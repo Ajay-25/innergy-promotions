@@ -1,0 +1,115 @@
+CREATE TYPE "public"."app_status_enum" AS ENUM('Already Installed', 'New Installation');--> statement-breakpoint
+CREATE TYPE "public"."attendance_status_enum" AS ENUM('Present', 'Absent');--> statement-breakpoint
+CREATE TYPE "public"."availability_status_enum" AS ENUM('Available', 'Unavailable', 'Tentative');--> statement-breakpoint
+CREATE TYPE "public"."module_type_enum" AS ENUM('Module 1', 'Module 2', 'Both');--> statement-breakpoint
+CREATE TYPE "public"."sewa_type_enum" AS ENUM('Trainer', 'Promoter', 'Both');--> statement-breakpoint
+CREATE TABLE "event_attendance" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"event_id" uuid NOT NULL,
+	"golden_member_id" uuid NOT NULL,
+	"module_attended" "module_type_enum",
+	"status" "attendance_status_enum" DEFAULT 'Absent' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "event_photos" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"event_id" uuid NOT NULL,
+	"photo_url" text DEFAULT '' NOT NULL,
+	"uploaded_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "golden_members" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"registered_by" uuid,
+	"full_name" text DEFAULT '' NOT NULL,
+	"contact_no" text DEFAULT '',
+	"innergy_email" text DEFAULT '',
+	"city_center" text DEFAULT '',
+	"zone" text DEFAULT '',
+	"dob" date,
+	"preferred_language" text DEFAULT 'Hindi' NOT NULL,
+	"remarks" text DEFAULT '',
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "promotion_logs" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"registered_by" uuid,
+	"interaction_type" text DEFAULT 'Standard',
+	"citizen_name" text DEFAULT '',
+	"contact_number" text DEFAULT '',
+	"email_used" text DEFAULT '',
+	"app_status" "app_status_enum",
+	"tech_issue_notes" text DEFAULT '',
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "sewadar_attendance" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"sewadar_id" uuid NOT NULL,
+	"date" date NOT NULL,
+	"time_of_sewa" time NOT NULL,
+	"sewa_area" "sewa_type_enum" DEFAULT 'Promoter' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "sewadar_core" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"email" text NOT NULL,
+	"clerk_id" text,
+	"system_role" text DEFAULT 'volunteer' NOT NULL,
+	"permissions" text[] DEFAULT '{}'::text[] NOT NULL,
+	"phone" text DEFAULT '',
+	"gender" text DEFAULT '',
+	"dob" date,
+	"zone" text DEFAULT '',
+	"center" text DEFAULT '',
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "sewadar_core_email_unique" UNIQUE("email"),
+	CONSTRAINT "sewadar_core_clerk_id_unique" UNIQUE("clerk_id")
+);
+--> statement-breakpoint
+CREATE TABLE "sewadar_data" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"sewadar_id" uuid NOT NULL,
+	"full_name" text DEFAULT '' NOT NULL,
+	"phone" text DEFAULT '',
+	"sewa_type" "sewa_type_enum" DEFAULT 'Promoter' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "sewadar_data_sewadar_id_unique" UNIQUE("sewadar_id")
+);
+--> statement-breakpoint
+CREATE TABLE "sewadar_roster" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"sewadar_id" uuid NOT NULL,
+	"planned_date" date NOT NULL,
+	"event_remarks" text DEFAULT '',
+	"availability_status" "availability_status_enum" DEFAULT 'Available' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "training_events" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"title" text DEFAULT '' NOT NULL,
+	"module_type" "module_type_enum" DEFAULT 'Module 1' NOT NULL,
+	"event_date" date NOT NULL,
+	"timing" text DEFAULT '',
+	"venue" text DEFAULT '',
+	"trainer_ids" uuid[] DEFAULT '{}',
+	"support_sewadar_ids" uuid[] DEFAULT '{}',
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+ALTER TABLE "event_attendance" ADD CONSTRAINT "event_attendance_event_id_training_events_id_fk" FOREIGN KEY ("event_id") REFERENCES "public"."training_events"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "event_attendance" ADD CONSTRAINT "event_attendance_golden_member_id_golden_members_id_fk" FOREIGN KEY ("golden_member_id") REFERENCES "public"."golden_members"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "event_photos" ADD CONSTRAINT "event_photos_event_id_training_events_id_fk" FOREIGN KEY ("event_id") REFERENCES "public"."training_events"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "golden_members" ADD CONSTRAINT "golden_members_registered_by_sewadar_core_id_fk" FOREIGN KEY ("registered_by") REFERENCES "public"."sewadar_core"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "promotion_logs" ADD CONSTRAINT "promotion_logs_registered_by_sewadar_core_id_fk" FOREIGN KEY ("registered_by") REFERENCES "public"."sewadar_core"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sewadar_attendance" ADD CONSTRAINT "sewadar_attendance_sewadar_id_sewadar_core_id_fk" FOREIGN KEY ("sewadar_id") REFERENCES "public"."sewadar_core"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sewadar_data" ADD CONSTRAINT "sewadar_data_sewadar_id_sewadar_core_id_fk" FOREIGN KEY ("sewadar_id") REFERENCES "public"."sewadar_core"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sewadar_roster" ADD CONSTRAINT "sewadar_roster_sewadar_id_sewadar_core_id_fk" FOREIGN KEY ("sewadar_id") REFERENCES "public"."sewadar_core"("id") ON DELETE cascade ON UPDATE no action;
