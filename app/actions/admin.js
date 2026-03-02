@@ -35,6 +35,7 @@ export async function getSewadars() {
       dob: sewadarCore.dob,
       zone: sewadarCore.zone,
       center: sewadarCore.center,
+      createdAt: sewadarCore.createdAt,
       fullName: sewadarData.fullName,
       dataPhone: sewadarData.phone,
       sewaType: sewadarData.sewaType,
@@ -56,6 +57,7 @@ export async function getSewadars() {
       dob: r.dob || null,
       zone: r.zone || '',
       center: r.center || '',
+      created_at: r.createdAt || null,
       sewa_type: r.sewaType || 'Promoter',
     })),
   }
