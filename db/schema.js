@@ -6,6 +6,7 @@ import {
   timestamp,
   date,
   time,
+  boolean,
   pgEnum,
 } from 'drizzle-orm/pg-core'
 
@@ -25,15 +26,19 @@ export const availabilityStatusEnum = pgEnum('availability_status_enum', ['Avail
 
 export const sewadarCore = pgTable('sewadar_core', {
   id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull().default(''),
   email: text('email').notNull().unique(),
   clerkId: text('clerk_id').unique(),
-  systemRole: text('system_role').notNull().default('volunteer'),
+  systemRole: text('system_role').notNull().default('pending'),
   permissions: text('permissions').array().notNull().default(sql`'{}'::text[]`),
+  isFieldVolunteer: boolean('is_field_volunteer').notNull().default(true),
   phone: text('phone').default(''),
   gender: text('gender').default(''),
   dob: date('dob'),
+  address: text('address').default(''),
   zone: text('zone').default(''),
   center: text('center').default(''),
+  profileCompleted: boolean('profile_completed').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -44,6 +49,7 @@ export const sewadarData = pgTable('sewadar_data', {
   fullName: text('full_name').notNull().default(''),
   phone: text('phone').default(''),
   sewaType: sewaTypeEnum('sewa_type').notNull().default('Promoter'),
+  address: text('address').default(''),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

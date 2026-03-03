@@ -82,9 +82,11 @@ export async function getUnifiedAccessDirectory() {
         clerkId: sewadarCore.clerkId,
         systemRole: sewadarCore.systemRole,
         permissions: sewadarCore.permissions,
+        isFieldVolunteer: sewadarCore.isFieldVolunteer,
         phone: sewadarCore.phone,
         zone: sewadarCore.zone,
         center: sewadarCore.center,
+        name: sewadarCore.name,
         fullName: sewadarData.fullName,
       })
       .from(sewadarCore)
@@ -109,9 +111,10 @@ export async function getUnifiedAccessDirectory() {
     const entry = {
       id: r.id,
       email: r.email || '',
-      full_name: r.fullName || '',
+      full_name: (r.name && r.name.trim()) || r.fullName || '',
       clerk_id: r.clerkId || null,
       system_role: r.systemRole || 'volunteer',
+      is_field_volunteer: r.isFieldVolunteer ?? true,
       permissions: Array.isArray(r.permissions) ? r.permissions : [],
       phone: r.phone || '',
       zone: r.zone || '',
@@ -147,6 +150,42 @@ export async function getUnifiedAccessDirectory() {
   return { data: unified }
 }
 
+/**
+ * Field volunteers only (for Volunteer Directory tab). Returns sewadar_core rows where is_field_volunteer === true.
+ */
+export async function getFieldVolunteers() {
+  const user = await currentUser()
+  if (!user) return { error: 'Unauthorized', data: [] }
+
+  const rows = await db
+    .select({
+      id: sewadarCore.id,
+      name: sewadarCore.name,
+      email: sewadarCore.email,
+      phone: sewadarCore.phone,
+      zone: sewadarCore.zone,
+      center: sewadarCore.center,
+      gender: sewadarCore.gender,
+      dob: sewadarCore.dob,
+    })
+    .from(sewadarCore)
+    .where(eq(sewadarCore.isFieldVolunteer, true))
+    .orderBy(sewadarCore.name)
+
+  return {
+    data: rows.map((r) => ({
+      id: r.id,
+      full_name: (r.name && r.name.trim()) || r.email || 'Unnamed',
+      email: r.email || '',
+      phone: r.phone || '',
+      zone: r.zone || '',
+      center: r.center || '',
+      gender: r.gender || '',
+      dob: r.dob ?? null,
+    })),
+  }
+}
+
 /** Hierarchy: admin > moderator > volunteer. Moderators cannot edit admins. */
 function canEditTarget(currentRole, targetRole) {
   if (!currentRole || currentRole === 'volunteer') return false
@@ -156,18 +195,18 @@ function canEditTarget(currentRole, targetRole) {
 }
 
 /**
- * Update user access: system_role and permissions. Single source of truth (DB), then sync to Clerk.
+ * Update user access: system_role, permissions, and is_field_volunteer. Single source of truth (DB), then sync to Clerk.
  * Enforces hierarchy: moderators cannot modify admins.
  * Caller must have system:manage_access.
  */
-export async function updateUserAccess(email, role, permissions) {
+export async function updateUserAccess(email, role, permissions, isFieldVolunteer) {
   const user = await currentUser()
   if (!user) return { error: 'Unauthorized' }
   const perms = Array.isArray(user.publicMetadata?.permissions) ? user.publicMetadata.permissions : []
   if (!hasPermission(perms, 'system:manage_access')) return { error: 'Forbidden' }
 
   const currentRole = (user.publicMetadata?.role ?? 'volunteer').toLowerCase()
-  const validRoles = ['admin', 'moderator', 'volunteer']
+  const validRoles = ['admin', 'moderator', 'volunteer', 'pending']
   const newRole = (role || 'volunteer').toLowerCase()
   if (!validRoles.includes(newRole)) return { error: 'Invalid system role' }
 
@@ -190,13 +229,18 @@ export async function updateUserAccess(email, role, permissions) {
     return { error: 'Moderators cannot assign Admin role.' }
   }
 
+  const updatePayload = {
+    systemRole: newRole,
+    permissions,
+    updatedAt: new Date(),
+  }
+  if (typeof isFieldVolunteer === 'boolean') {
+    updatePayload.isFieldVolunteer = isFieldVolunteer
+  }
+
   await db
     .update(sewadarCore)
-    .set({
-      systemRole: newRole,
-      permissions,
-      updatedAt: new Date(),
-    })
+    .set(updatePayload)
     .where(eq(sewadarCore.email, email))
 
   if (row.clerkId) {
@@ -252,18 +296,29 @@ export async function registerVolunteer(data) {
   const existing = await db.select({ id: sewadarCore.id }).from(sewadarCore).where(eq(sewadarCore.email, data.email)).limit(1)
   if (existing.length > 0) return { error: 'A sewadar with this email already exists' }
 
-  const systemRole = ['admin', 'moderator', 'volunteer'].includes((data.system_role || '').toLowerCase())
-    ? (data.system_role || 'volunteer').toLowerCase()
-    : 'volunteer'
+  const systemRole = ['admin', 'moderator', 'volunteer', 'pending'].includes((data.system_role || '').toLowerCase())
+    ? (data.system_role || 'pending').toLowerCase()
+    : 'pending'
   const permissions = Array.isArray(data.permissions) && data.permissions.length > 0
     ? data.permissions
-    : (ROLE_PERMISSIONS_MAP[systemRole] ?? ROLE_PERMISSIONS_MAP.volunteer)
+    : (ROLE_PERMISSIONS_MAP[systemRole] ?? ROLE_PERMISSIONS_MAP.pending ?? [])
+  const isFieldVolunteer =
+    typeof data.is_field_volunteer === 'boolean'
+      ? data.is_field_volunteer
+      : systemRole === 'admin'
+        ? false
+        : true
 
   const phone = typeof data.phone === 'string' ? data.phone.trim() : ''
+  const name = typeof data.full_name === 'string' ? data.full_name.trim() : ''
+  const clerkId = typeof data.clerk_id === 'string' && data.clerk_id.trim() ? data.clerk_id.trim() : null
   const [inserted] = await db.insert(sewadarCore).values({
     email: data.email,
+    name: name || data.email || 'Unnamed',
+    clerkId: clerkId || undefined,
     systemRole,
     permissions,
+    isFieldVolunteer,
     phone: phone || null,
     gender: (data.gender && ['Male', 'Female', 'Other'].includes(data.gender)) ? data.gender : null,
     dob: data.dob || null,
@@ -279,6 +334,23 @@ export async function registerVolunteer(data) {
     phone: phone || '',
     sewaType: data.sewa_type || 'Promoter',
   })
+
+  if (clerkId) {
+    try {
+      const client = await clerkClient()
+      const clerkUser = await client.users.getUser(clerkId)
+      await client.users.updateUserMetadata(clerkId, {
+        publicMetadata: {
+          ...clerkUser.publicMetadata,
+          role: systemRole,
+          permissions,
+          synced: true,
+        },
+      })
+    } catch (_) {
+      // DB is source of truth
+    }
+  }
 
   return { ok: true }
 }

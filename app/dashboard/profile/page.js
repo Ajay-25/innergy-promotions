@@ -1,611 +1,260 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useDashboard } from '@/contexts/DashboardContext'
+import { getMyProfile, updateMyProfile } from '@/app/actions/profile'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Separator } from '@/components/ui/separator'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
-import { FormField, FieldGroup } from '@/components/dashboard/form-fields'
-import {
-  Loader2,
-  Save,
-  Shield,
-  MapPin,
-  Heart,
-  Briefcase,
-  FileText,
-  Package,
-  CheckCircle2,
-  BarChart3,
-  Phone,
-  UserCog,
-  Pencil,
-  Download,
-  Share2,
-  Calendar,
-  User,
-  QrCode,
-  Mail,
-  CalendarDays,
-  Hash,
-  Map,
-  HeartHandshake,
-  IdCard,
-  Shirt,
-  CalendarPlus,
-  Clock,
-  Activity,
-  Users,
-} from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Loader2, Save, Pencil, Phone, Mail, User, Calendar, MapPin, Lock } from 'lucide-react'
 import { toast } from 'sonner'
-import { PROFILE_TABS, groupBySection } from '@/lib/field-configs'
 
-const sectionIcons = {
-  'Permanent Address': <MapPin className="h-3.5 w-3.5 text-orange-500" />,
-  'Communication Address': <MapPin className="h-3.5 w-3.5 text-blue-500" />,
-  'Department & Region': <Shield className="h-3.5 w-3.5 text-teal-500" />,
-  'Initiation': <Heart className="h-3.5 w-3.5 text-red-500" />,
-  'Duty Areas - Permanent': <MapPin className="h-3.5 w-3.5 text-green-500" />,
-  'Duty Areas - Current': <MapPin className="h-3.5 w-3.5 text-cyan-500" />,
-  'Qualification': <FileText className="h-3.5 w-3.5 text-indigo-500" />,
-  'Profession': <Briefcase className="h-3.5 w-3.5 text-amber-500" />,
-  'I-Card & Uniform': <Package className="h-3.5 w-3.5 text-purple-500" />,
-  'Orientation': <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />,
-  'Status': <BarChart3 className="h-3.5 w-3.5 text-blue-500" />,
-  'Digital & Apps': <Phone className="h-3.5 w-3.5 text-pink-500" />,
-  'Preferences': <Heart className="h-3.5 w-3.5 text-rose-500" />,
-  'Data Metadata': <FileText className="h-3.5 w-3.5 text-gray-500" />,
-  'ID Proof': <FileText className="h-3.5 w-3.5 text-blue-500" />,
-  'Admin': <UserCog className="h-3.5 w-3.5 text-red-500" />,
-}
+const GENDER_OPTIONS = ['Male', 'Female', 'Other']
 
 function getInitials(name) {
   if (!name || typeof name !== 'string') return '?'
-  return name
-    .trim()
-    .split(/\s+/)
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase() || '?'
+  return name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
 }
 
-function useSheetSide() {
-  const [side, setSide] = useState('right')
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)')
-    setSide(mq.matches ? 'bottom' : 'right')
-    const fn = () => setSide(mq.matches ? 'bottom' : 'right')
-    mq.addEventListener('change', fn)
-    return () => mq.removeEventListener('change', fn)
-  }, [])
-  return side
+function formatPhone(value) {
+  if (!value) return ''
+  const v = String(value).replace(/\D/g, '')
+  if (v.length <= 10) return v
+  return v.slice(0, 10)
 }
 
 export default function ProfilePage() {
-  const queryClient = useQueryClient()
-  const { session, role, profileCore, profileData, profileLoading, refreshProfile } = useDashboard()
-  const [editSheetOpen, setEditSheetOpen] = useState(false)
-  const [formData, setFormData] = useState({})
+  const { refreshProfile } = useDashboard()
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [QRCode, setQRCode] = useState(null)
-  const sheetSide = useSheetSide()
+  const [form, setForm] = useState({
+    name: '',
+    phone: '',
+    gender: '',
+    dob: '',
+    address: '',
+  })
 
-  const isAdmin = role === 'admin'
-
-  useEffect(() => {
-    import('react-qr-code').then((mod) => setQRCode(() => mod.default || mod))
-  }, [])
-
-  useEffect(() => {
-    if (profileCore || profileData) {
-      setFormData({
-        ...(profileData || {}),
-        member_id: profileCore?.member_id || '',
-        first_name: profileCore?.first_name || '',
-        middle_name: profileCore?.middle_name || '',
-        last_name: profileCore?.last_name || '',
-        full_name: profileCore?.full_name || '',
-      })
-    }
-  }, [profileCore, profileData])
-
-  const handleChange = useCallback((key, value) => {
-    setFormData((prev) => ({ ...prev, [key]: value }))
-  }, [])
-
-  const handleSave = async () => {
-    const previousData = queryClient.getQueryData(['my-profile'])
-    const {
-      member_id,
-      first_name,
-      middle_name,
-      last_name,
-      full_name,
-      id,
-      user_id,
-      created_at,
-      updated_at,
-      ...dataFields
-    } = formData
-    const computedFullName =
-      [first_name, middle_name, last_name].filter(Boolean).join(' ') || full_name
-    const optimisticCore = {
-      ...(profileCore || {}),
-      member_id: member_id ?? profileCore?.member_id,
-      first_name: first_name ?? profileCore?.first_name,
-      middle_name: middle_name ?? profileCore?.middle_name,
-      last_name: last_name ?? profileCore?.last_name,
-      full_name: computedFullName,
-    }
-    const optimisticData = { ...(profileData || {}), ...dataFields }
-
-    queryClient.setQueryData(['my-profile'], { core: optimisticCore, data: optimisticData })
-    setEditSheetOpen(false)
-    setSaving(true)
-
-    try {
-      const res = await fetch('/api/profile/update', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          core: { member_id, first_name, middle_name, last_name, full_name: computedFullName },
-          data: dataFields,
-        }),
-      })
-      if (res.ok) {
-        toast.success('Profile updated')
-        refreshProfile()
-      } else {
-        queryClient.setQueryData(['my-profile'], previousData)
-        toast.error('Failed to update profile')
-      }
-    } catch {
-      queryClient.setQueryData(['my-profile'], previousData)
-      toast.error('Failed to update profile')
-    }
-    setSaving(false)
-  }
-
-  const handleDownloadQR = useCallback(() => {
-    const container = document.getElementById('profile-qr')
-    if (!container) {
-      toast.error('QR not ready')
+  const loadProfile = useCallback(async () => {
+    setLoading(true)
+    const res = await getMyProfile()
+    setLoading(false)
+    if (res.error) {
+      toast.error(res.error)
       return
     }
-    const canvas = container.querySelector('canvas')
-    const svg = container.querySelector('svg')
-    if (canvas) {
-      const link = document.createElement('a')
-      link.download = 'my-ya-qr.png'
-      link.href = canvas.toDataURL('image/png')
-      link.click()
-      return
-    }
-    if (svg) {
-      const svgData = new XMLSerializer().serializeToString(svg)
-      const img = new Image()
-      img.onload = () => {
-        const c = document.createElement('canvas')
-        c.width = img.width
-        c.height = img.height
-        const ctx = c.getContext('2d')
-        ctx.fillStyle = 'white'
-        ctx.fillRect(0, 0, c.width, c.height)
-        ctx.drawImage(img, 0, 0)
-        const link = document.createElement('a')
-        link.download = 'my-ya-qr.png'
-        link.href = c.toDataURL('image/png')
-        link.click()
-      }
-      img.onerror = () => toast.error('Download failed')
-      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
-      return
-    }
-    toast.error('QR not ready')
-  }, [])
-
-  const handleShareQR = useCallback(async () => {
-    if (!navigator.share) {
-      toast.info('Sharing not supported on this device')
-      return
-    }
-    const container = document.getElementById('profile-qr')
-    if (!container) {
-      toast.error('QR not ready')
-      return
-    }
-    const canvas = container.querySelector('canvas')
-    const svg = container.querySelector('svg')
-    const getPngBlob = (cb) => {
-      if (canvas) {
-        canvas.toBlob(cb, 'image/png')
-        return
-      }
-      if (svg) {
-        const svgData = new XMLSerializer().serializeToString(svg)
-        const img = new Image()
-        img.onload = () => {
-          const c = document.createElement('canvas')
-          c.width = img.width
-          c.height = img.height
-          const ctx = c.getContext('2d')
-          ctx.fillStyle = 'white'
-          ctx.fillRect(0, 0, c.width, c.height)
-          ctx.drawImage(img, 0, 0)
-          c.toBlob(cb, 'image/png')
-        }
-        img.onerror = () => toast.error('Share failed')
-        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
-        return
-      }
-      cb(null)
-    }
-    getPngBlob(async (blob) => {
-      if (!blob) {
-        toast.error('QR not ready')
-        return
-      }
-      try {
-        const f = new File([blob], 'my-ya-qr.png', { type: 'image/png' })
-        await navigator.share({ title: 'My YA QR', files: [f] })
-        toast.success('Shared')
-      } catch (e) {
-        if (e.name !== 'AbortError') toast.error('Share failed')
-      }
+    const p = res.profile || {}
+    setProfile(p)
+    setForm({
+      name: p.name || '',
+      phone: p.phone ? (p.phone.startsWith('+91') ? p.phone.slice(3).trim() : p.phone.replace(/\D/g, '').slice(-10)) : '',
+      gender: p.gender || '',
+      dob: p.dob ? (typeof p.dob === 'string' ? p.dob.slice(0, 10) : String(p.dob).slice(0, 10)) : '',
+      address: p.address || '',
     })
   }, [])
 
-  const core = profileCore || {}
-  const data = profileData || {}
+  useEffect(() => {
+    loadProfile()
+  }, [loadProfile])
 
-  if (profileLoading) {
+  const handleSave = async () => {
+    setSaving(true)
+    const phoneFormatted = form.phone ? `+91${formatPhone(form.phone)}` : ''
+    const res = await updateMyProfile({
+      name: form.name,
+      phone: phoneFormatted,
+      gender: form.gender || undefined,
+      dob: form.dob || undefined,
+      address: form.address,
+    })
+    setSaving(false)
+    if (res.error) {
+      toast.error(res.error)
+      return
+    }
+    toast.success('Profile updated')
+    setEditing(false)
+    loadProfile()
+    refreshProfile()
+  }
+
+  const handleCancel = () => {
+    setForm({
+      name: profile?.name || '',
+      phone: profile?.phone ? (profile.phone.startsWith('+91') ? profile.phone.slice(3).trim() : profile.phone.replace(/\D/g, '').slice(-10)) : '',
+      gender: profile?.gender || '',
+      dob: profile?.dob ? (typeof profile.dob === 'string' ? profile.dob.slice(0, 10) : String(profile.dob).slice(0, 10)) : '',
+      address: profile?.address || '',
+    })
+    setEditing(false)
+  }
+
+  if (loading) {
     return (
-      <div className="p-4 space-y-4">
-        <Skeleton className="h-32 w-full rounded-xl" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="p-4 flex items-center justify-center min-h-[200px]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
+  const displayPhone = profile?.phone ? (profile.phone.startsWith('+91') ? profile.phone : `+91 ${profile.phone.replace(/\D/g, '')}`) : '—'
+
   return (
-    <div className="p-4 pb-6">
-      {/* Digital ID Header Card */}
-      <Card className="relative overflow-hidden border-2 shadow-sm">
-        <CardHeader className="pb-3 pt-4">
-          <div className="flex items-start justify-between gap-3">
+    <div className="p-4 pb-6 max-w-2xl mx-auto">
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <Avatar className="h-14 w-14 shrink-0 border-2 border-background shadow">
+              <Avatar className="h-14 w-14 shrink-0 border-2 border-background">
                 <AvatarFallback className="bg-primary/15 text-primary text-lg font-semibold">
-                  {getInitials(core.full_name)}
+                  {getInitials(profile?.name)}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
                 <h2 className="text-xl font-bold text-foreground truncate">
-                  {core.full_name || '--'}
+                  {profile?.name || '—'}
                 </h2>
-                {core.member_id && (
-                  <Badge variant="secondary" className="font-mono mt-1">
-                    {core.member_id}
-                  </Badge>
-                )}
-                {data.department && (
-                  <p className="text-sm text-muted-foreground mt-1 truncate">
-                    {data.department}
-                  </p>
-                )}
+                <p className="text-sm text-muted-foreground truncate">{profile?.email || '—'}</p>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 shrink-0"
-              onClick={() => setEditSheetOpen(true)}
-              aria-label="Edit profile"
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
+            {!editing ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 shrink-0"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil className="h-4 w-4" />
+                Edit Profile
+              </Button>
+            ) : (
+              <div className="flex gap-2 shrink-0">
+                <Button variant="outline" size="sm" onClick={handleCancel} disabled={saving}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSave} disabled={saving} className="gap-1.5">
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Save
+                </Button>
+              </div>
+            )}
           </div>
         </CardHeader>
-      </Card>
+        <CardContent className="space-y-4">
+          {/* Name */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-muted-foreground">
+              <User className="h-4 w-4" />
+              Name
+            </Label>
+            {editing ? (
+              <Input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Full name"
+              />
+            ) : (
+              <p className="text-foreground">{profile?.name || '—'}</p>
+            )}
+          </div>
 
-      {/* Tabbed content */}
-      <Tabs defaultValue="personal" className="w-full mt-4">
-        <TabsList className="grid w-full grid-cols-3 h-10">
-          <TabsTrigger value="personal" className="gap-1.5 text-xs">
-            <User className="h-3.5 w-3.5" />
-            Personal Info
-          </TabsTrigger>
-          <TabsTrigger value="sewa" className="gap-1.5 text-xs">
-            <MapPin className="h-3.5 w-3.5" />
-            Department Details
-          </TabsTrigger>
-          <TabsTrigger value="qr" className="gap-1.5 text-xs">
-            <QrCode className="h-3.5 w-3.5" />
-            My QR
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="personal" className="mt-4">
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex items-start gap-3">
-                  <User className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">First Name</p>
-                    <p className="text-sm font-medium">{core.first_name || '--'}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <User className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Last Name</p>
-                    <p className="text-sm font-medium">{core.last_name || '--'}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Phone className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Contact Number</p>
-                    <p className="text-sm font-medium">{data.contact_number || '--'}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Mail className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Email</p>
-                    <p className="text-sm font-medium">{data.email_id || '--'}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Users className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Gender</p>
-                    <p className="text-sm font-medium">{data.gender || '--'}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <CalendarDays className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Date of Birth</p>
-                    <p className="text-sm font-medium">{data.date_of_birth || '--'}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Hash className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Age</p>
-                    <p className="text-sm font-medium">{data.age != null && data.age !== '' ? String(data.age) : '--'}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 md:col-span-2">
-                  <MapPin className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Address</p>
-                    <p className="text-sm font-medium break-words">{data.permanent_address || '--'}</p>
-                  </div>
-                </div>
+          {/* Contact Number */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-muted-foreground">
+              <Phone className="h-4 w-4" />
+              Contact Number
+            </Label>
+            {editing ? (
+              <div className="flex rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+                <span className="inline-flex items-center px-3 text-muted-foreground border-r text-sm">+91</span>
+                <Input
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: formatPhone(e.target.value) }))}
+                  placeholder="10-digit number"
+                  className="border-0 focus-visible:ring-0 rounded-l-none"
+                  maxLength={10}
+                />
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+            ) : (
+              <p className="text-foreground">{displayPhone}</p>
+            )}
+          </div>
 
-        <TabsContent value="sewa" className="mt-4">
-          <Card>
-            <CardContent className="pt-4 pb-4 space-y-6">
-              <section>
-                <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">
-                  Department Details
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex items-start gap-3">
-                    <MapPin className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Department</p>
-                      <p className="text-sm font-medium">{data.department || '--'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Map className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Region</p>
-                      <p className="text-sm font-medium">{data.region || '--'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <HeartHandshake className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Primary Duty (Current)</p>
-                      <p className="text-sm font-medium">{data.primary_duty_current || '--'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Briefcase className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Primary Duty (Permanent)</p>
-                      <p className="text-sm font-medium">{data.primary_duty_permanent || '--'}</p>
-                    </div>
-                  </div>
-                </div>
-              </section>
-              <Separator className="my-4" />
-              <section>
-                <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">
-                  YA Details
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex items-start gap-3">
-                    <IdCard className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Permanent I-Card Status</p>
-                      <p className="text-sm font-medium">{data.permanent_icard_status || '--'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Shirt className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Uniform</p>
-                      <p className="text-sm font-medium">{data.uniform || '--'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CalendarPlus className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Date of Joining / Orientation</p>
-                      <p className="text-sm font-medium">{data.date_of_joining || '--'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Clock className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Years of Membership</p>
-                      <p className="text-sm font-medium">{data.years_of_membership != null && data.years_of_membership !== '' ? String(data.years_of_membership) : '--'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Activity className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Active Status</p>
-                      <p className="text-sm font-medium">{data.active_status || '--'}</p>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </CardContent>
-          </Card>
-        </TabsContent>
+          {/* Email (read-only) */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-muted-foreground">
+              <Mail className="h-4 w-4" />
+              Email
+              <Lock className="h-3.5 w-3.5 text-muted-foreground/70" title="Read-only" />
+            </Label>
+            <p className="text-foreground flex items-center gap-2">
+              {profile?.email || '—'}
+            </p>
+          </div>
 
-        <TabsContent value="qr" className="mt-4">
-          <Card>
-            <CardContent className="flex flex-col items-center py-8">
-              <div id="profile-qr" className="bg-white p-4 rounded-xl shadow-inner">
-                {QRCode && session?.user?.id ? (
-                  <QRCode value={session.user.id} size={220} level="H" />
-                ) : (
-                  <div className="w-[220px] h-[220px] flex items-center justify-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground mt-3 text-center">
-                Show this for identification
-              </p>
-              <div className="flex gap-2 mt-4">
-                <Button variant="outline" size="sm" onClick={handleDownloadQR} className="gap-1.5">
-                  <Download className="h-3.5 w-3.5" />
-                  Download
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleShareQR} className="gap-1.5">
-                  <Share2 className="h-3.5 w-3.5" />
-                  Share
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Edit Sheet (slide-over) */}
-      <Sheet open={editSheetOpen} onOpenChange={setEditSheetOpen}>
-        <SheetContent
-          side={sheetSide}
-          className={
-            sheetSide === 'bottom'
-              ? 'h-[90vh] overflow-y-auto rounded-t-2xl'
-              : 'w-full max-w-lg overflow-y-auto sm:max-w-xl'
-          }
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>Edit Profile</SheetTitle>
-          </SheetHeader>
-          <div className="pb-24">
-            <Tabs defaultValue="personal" className="w-full">
-              <div className="overflow-x-auto -mx-2 px-2 pb-1">
-                <TabsList className="inline-flex w-auto min-w-full h-9">
-                  {PROFILE_TABS.map((tab) => (
-                    <TabsTrigger key={tab.id} value={tab.id} className="text-[11px] px-2.5 whitespace-nowrap">
-                      {tab.label}
-                    </TabsTrigger>
+          {/* Gender */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-muted-foreground">Gender</Label>
+            {editing ? (
+              <Select value={form.gender} onValueChange={(v) => setForm((f) => ({ ...f, gender: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  {GENDER_OPTIONS.map((g) => (
+                    <SelectItem key={g} value={g}>{g}</SelectItem>
                   ))}
-                  {isAdmin && (
-                    <TabsTrigger value="sensitive" className="text-[11px] px-2.5 whitespace-nowrap">
-                      Admin
-                    </TabsTrigger>
-                  )}
-                </TabsList>
-              </div>
-              {PROFILE_TABS.map((tab) => {
-                const sections = groupBySection(tab.fields)
-                const hasSections = Object.keys(sections).some((s) => s !== 'General')
-                return (
-                  <TabsContent key={tab.id} value={tab.id} className="mt-0 space-y-4">
-                    {hasSections ? (
-                      Object.entries(sections).map(([section, fields]) => (
-                        <FieldGroup
-                          key={section}
-                          title={section}
-                          icon={sectionIcons[section] || null}
-                          fields={fields}
-                          formData={formData}
-                          onChange={handleChange}
-                        />
-                      ))
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {tab.fields.map((f) => (
-                          <FormField
-                            key={f.key}
-                            field={f}
-                            value={formData[f.key]}
-                            onChange={handleChange}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
-                )
-              })}
-              {isAdmin && (
-                <TabsContent value="sensitive" className="mt-0">
-                  <Card>
-                    <CardContent className="py-6 text-center">
-                      <Shield className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
-                      <p className="text-sm text-muted-foreground">
-                        Sensitive data is view-only here. Use the Volunteers list to manage sensitive fields.
-                      </p>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              )}
-            </Tabs>
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-foreground">{profile?.gender || '—'}</p>
+            )}
           </div>
-          <div className="absolute bottom-0 left-0 right-0 p-4 bg-background border-t">
-            <Button
-              className="w-full h-12 font-medium"
-              disabled={saving}
-              onClick={handleSave}
-            >
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              Save Changes
-            </Button>
+
+          {/* DOB */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-muted-foreground">
+              <Calendar className="h-4 w-4" />
+              Date of Birth
+            </Label>
+            {editing ? (
+              <Input
+                type="date"
+                value={form.dob}
+                onChange={(e) => setForm((f) => ({ ...f, dob: e.target.value }))}
+              />
+            ) : (
+              <p className="text-foreground">
+                {profile?.dob ? new Date(profile.dob).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+              </p>
+            )}
           </div>
-        </SheetContent>
-      </Sheet>
+
+          {/* Address */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-muted-foreground">
+              <MapPin className="h-4 w-4" />
+              Address
+            </Label>
+            {editing ? (
+              <Textarea
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                placeholder="Address"
+                rows={3}
+                className="resize-none"
+              />
+            ) : (
+              <p className="text-foreground whitespace-pre-wrap">{profile?.address || '—'}</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

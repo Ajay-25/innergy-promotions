@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useDashboard } from '@/contexts/DashboardContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getUnifiedAccessDirectory, updateUserAccess, registerVolunteer } from '@/app/actions/admin'
-import { RegisterVolunteerModal } from '@/app/dashboard/volunteers/components/RegisterVolunteerModal'
 import { PERMISSION_GROUPS, ROLE_PERMISSIONS_MAP } from '@/lib/permissions'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -24,25 +23,10 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  Command,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-} from '@/components/ui/command'
-import {
   Search,
   Shield,
   ShieldCheck,
   Users,
-  UserPlus,
   Loader2,
   Save,
   Crown,
@@ -99,16 +83,21 @@ function getInitialGroupEnabledFromPermissions(permissions) {
   return out
 }
 
-/** Categorize unified directory into Pending, Core Team, Volunteers */
+/** Categorize unified directory into Pending Action, Pending Approval, Core Team, Volunteers */
 function categorizeUsers(users) {
   const pendingAction = users.filter((u) => !u.isSewadar)
+  const pendingApproval = users.filter(
+    (u) => u.isSewadar && String(u.system_role || '').toLowerCase() === 'pending'
+  )
   const coreTeam = users.filter(
     (u) => u.isSewadar && u.system_role && ['admin', 'moderator'].includes(String(u.system_role).toLowerCase())
   )
   const volunteers = users.filter(
-    (u) => u.isSewadar && (!u.system_role || String(u.system_role).toLowerCase() === 'volunteer')
+    (u) =>
+      u.isSewadar &&
+      String(u.system_role || '').toLowerCase() === 'volunteer'
   )
-  return { pendingAction, coreTeam, volunteers }
+  return { pendingAction, pendingApproval, coreTeam, volunteers }
 }
 
 // ─── User Card (identity + role badge + CTA) ─────────────────
@@ -117,13 +106,15 @@ const ROLE_BADGE_CLASSES = {
   admin: 'shrink-0 gap-1 text-[10px] bg-red-100 text-red-800 border border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800',
   moderator: 'shrink-0 gap-1 text-[10px] bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800',
   volunteer: 'shrink-0 gap-1 text-[10px] bg-green-100 text-green-800 border border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-800',
+  pending: 'shrink-0 gap-1 text-[10px] bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
 }
 
-function UserCard({ user, currentUserSystemRole, onManageAccess, onRegisterSewadar }) {
+function UserCard({ user, currentUserSystemRole, onManageAccess }) {
   const role = user.system_role ? String(user.system_role).toLowerCase() : null
   const isAdmin = role === 'admin'
   const isModerator = role === 'moderator'
-  const isVolunteer = role === 'volunteer' || (user.isSewadar && !role)
+  const isVolunteer = role === 'volunteer'
+  const isPendingApproval = user.isSewadar && role === 'pending'
   const isPending = !user.isSewadar
   const currentIsModerator = (currentUserSystemRole || '').toLowerCase() === 'moderator'
   const hierarchyLock = currentIsModerator && isAdmin
@@ -156,7 +147,12 @@ function UserCard({ user, currentUserSystemRole, onManageAccess, onRegisterSewad
                     Moderator
                   </Badge>
                 )}
-                {isVolunteer && !isAdmin && !isModerator && (
+                {isPendingApproval && (
+                  <Badge className={ROLE_BADGE_CLASSES.pending}>
+                    Pending
+                  </Badge>
+                )}
+                {isVolunteer && !isAdmin && !isModerator && !isPendingApproval && (
                   <Badge className={ROLE_BADGE_CLASSES.volunteer}>
                     <Users className="h-3 w-3" />
                     Volunteer
@@ -186,14 +182,14 @@ function UserCard({ user, currentUserSystemRole, onManageAccess, onRegisterSewad
                   className="gap-1.5 font-medium shadow-sm"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onRegisterSewadar?.(user)
+                    onManageAccess?.(user)
                   }}
                 >
-                  <UserPlus className="h-3.5 w-3.5" />
-                  Register Sewadar
+                  <UserCog className="h-3.5 w-3.5" />
+                  Setup Access
                 </Button>
                 <p className="text-[10px] text-muted-foreground text-right">
-                  Action required to grant access
+                  Assign role and permissions
                 </p>
               </>
             ) : (
@@ -223,88 +219,6 @@ function UserCard({ user, currentUserSystemRole, onManageAccess, onRegisterSewad
   )
 }
 
-// ─── Promote / Search Sewadar Dialog ────────────────────────
-
-function PromoteDialog({ open, onOpenChange, staff, onSelect }) {
-  const [search, setSearch] = useState('')
-  const debouncedSearch = useDebouncedValue(search, 300)
-
-  const results = useMemo(() => {
-    if (!debouncedSearch.trim()) return []
-    const q = debouncedSearch.toLowerCase()
-    return staff.filter(
-      (u) =>
-        (u.full_name && String(u.full_name).toLowerCase().includes(q)) ||
-        (u.email && String(u.email).toLowerCase().includes(q))
-    )
-  }, [staff, debouncedSearch])
-
-  useEffect(() => {
-    if (!open) setSearch('')
-  }, [open])
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="p-0 gap-0 max-w-lg">
-        <DialogHeader className="px-4 pt-4 pb-2">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <UserPlus className="h-4 w-4" />
-            Grant Access / Promote Volunteer
-          </DialogTitle>
-        </DialogHeader>
-        <Command className="border-t" shouldFilter={false}>
-          <CommandInput
-            placeholder="Search by name or email..."
-            value={search}
-            onValueChange={setSearch}
-          />
-          <CommandList className="max-h-72">
-            {debouncedSearch.length < 2 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">
-                Type at least 2 characters to search
-              </div>
-            ) : (
-              <>
-                <CommandEmpty>No sewadars found.</CommandEmpty>
-                <CommandGroup>
-                  {results.map((u) => (
-                    <CommandItem
-                      key={u.id}
-                      value={u.id}
-                      onSelect={() => {
-                        onSelect(u)
-                        onOpenChange(false)
-                      }}
-                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer"
-                    >
-                      <Avatar className="h-9 w-9 shrink-0">
-                        <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                          {getInitials(u.full_name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{u.full_name || 'Unnamed'}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {u.email || '—'}
-                        </p>
-                      </div>
-                      {(u.permissions?.length ?? 0) > 0 && (
-                        <Badge variant="secondary" className="text-[10px] shrink-0">
-                          {(u.permissions ?? []).length} permission{(u.permissions ?? []).length !== 1 ? 's' : ''}
-                        </Badge>
-                      )}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </>
-            )}
-          </CommandList>
-        </Command>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 // ─── Staff Master List (categorized sections + UserCards) ─────
 
 function StaffMasterList({
@@ -312,7 +226,6 @@ function StaffMasterList({
   isLoading,
   currentUserSystemRole,
   onSelectUser,
-  onRegisterAsSewadar,
 }) {
   const [searchInput, setSearchInput] = useState('')
 
@@ -326,7 +239,7 @@ function StaffMasterList({
     )
   }, [users, searchInput])
 
-  const { pendingAction, coreTeam, volunteers } = useMemo(
+  const { pendingAction, pendingApproval, coreTeam, volunteers } = useMemo(
     () => categorizeUsers(filtered),
     [filtered]
   )
@@ -357,7 +270,7 @@ function StaffMasterList({
     )
   }
 
-  const hasAny = pendingAction.length > 0 || coreTeam.length > 0 || volunteers.length > 0
+  const hasAny = pendingAction.length > 0 || pendingApproval.length > 0 || coreTeam.length > 0 || volunteers.length > 0
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -402,7 +315,27 @@ function StaffMasterList({
                       user={u}
                       currentUserSystemRole={currentUserSystemRole}
                       onManageAccess={onSelectUser}
-                      onRegisterSewadar={onRegisterAsSewadar}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {pendingApproval.length > 0 && (
+              <section>
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  Pending Approval
+                </h2>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Registered — assign role to grant dashboard access
+                </p>
+                <div className="space-y-2">
+                  {pendingApproval.map((u) => (
+                    <UserCard
+                      key={u.id}
+                      user={u}
+                      currentUserSystemRole={currentUserSystemRole}
+                      onManageAccess={onSelectUser}
                     />
                   ))}
                 </div>
@@ -424,7 +357,6 @@ function StaffMasterList({
                       user={u}
                       currentUserSystemRole={currentUserSystemRole}
                       onManageAccess={onSelectUser}
-                      onRegisterSewadar={onRegisterAsSewadar}
                     />
                   ))}
                 </div>
@@ -446,7 +378,6 @@ function StaffMasterList({
                       user={u}
                       currentUserSystemRole={currentUserSystemRole}
                       onManageAccess={onSelectUser}
-                      onRegisterSewadar={onRegisterAsSewadar}
                     />
                   ))}
                 </div>
@@ -466,21 +397,30 @@ function AccessControlSheet({
   open,
   onClose,
   queryClient,
-  onRegisterAsSewadar,
   currentUserSystemRole,
 }) {
   const sheetSide = useSheetSide()
   const [selectedPermissions, setSelectedPermissions] = useState([])
-  const [selectedSystemRole, setSelectedSystemRole] = useState('volunteer')
+  const [selectedSystemRole, setSelectedSystemRole] = useState('pending')
+  const [selectedShowInDirectory, setSelectedShowInDirectory] = useState(true)
   const [groupEnabled, setGroupEnabled] = useState(() => getInitialGroupEnabledFromPermissions([]))
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (selectedUser) {
-      const perms = Array.isArray(selectedUser.permissions) ? [...selectedUser.permissions] : []
-      setSelectedPermissions(perms)
-      setSelectedSystemRole((selectedUser.system_role || 'volunteer').toLowerCase())
-      setGroupEnabled(getInitialGroupEnabledFromPermissions(perms))
+      if (selectedUser.isSewadar) {
+        const perms = Array.isArray(selectedUser.permissions) ? [...selectedUser.permissions] : []
+        const role = (selectedUser.system_role || 'volunteer').toLowerCase()
+        setSelectedPermissions(perms)
+        setSelectedSystemRole(role)
+        setSelectedShowInDirectory(selectedUser.is_field_volunteer !== false)
+        setGroupEnabled(getInitialGroupEnabledFromPermissions(perms))
+      } else {
+        setSelectedSystemRole('pending')
+        setSelectedPermissions([])
+        setSelectedShowInDirectory(true)
+        setGroupEnabled(getInitialGroupEnabledFromPermissions([]))
+      }
     }
   }, [selectedUser])
 
@@ -493,11 +433,19 @@ function AccessControlSheet({
   }, [selectedUser, selectedPermissions])
 
   const roleDirty = useMemo(() => {
-    if (!selectedUser || !selectedUser.isSewadar) return false
+    if (!selectedUser) return false
+    if (!selectedUser.isSewadar) return true
     return (selectedUser.system_role || 'volunteer').toLowerCase() !== selectedSystemRole
   }, [selectedUser, selectedSystemRole])
 
-  const isDirty = permissionsDirty || roleDirty
+  const directoryDirty = useMemo(() => {
+    if (!selectedUser) return false
+    if (!selectedUser.isSewadar) return true
+    return selectedUser.is_field_volunteer !== selectedShowInDirectory
+  }, [selectedUser, selectedShowInDirectory])
+
+  const isDirty = permissionsDirty || roleDirty || directoryDirty
+  const isNewUser = selectedUser && !selectedUser.isSewadar
   const currentIsModerator = (currentUserSystemRole || '').toLowerCase() === 'moderator'
   const targetIsAdmin = (selectedUser?.system_role || '').toLowerCase() === 'admin'
   const hierarchyLock = currentIsModerator && targetIsAdmin
@@ -507,6 +455,8 @@ function AccessControlSheet({
     const rolePerms = ROLE_PERMISSIONS_MAP[value] ?? ROLE_PERMISSIONS_MAP.volunteer ?? []
     setSelectedPermissions([...rolePerms])
     setGroupEnabled(getInitialGroupEnabledFromPermissions(rolePerms))
+    if (value === 'volunteer') setSelectedShowInDirectory(true)
+    if (value === 'admin') setSelectedShowInDirectory(false)
   }, [])
 
   const togglePermission = useCallback((key) => {
@@ -524,30 +474,45 @@ function AccessControlSheet({
   }, [])
 
   const handleSave = useCallback(async () => {
-    if (!selectedUser || !selectedUser.email || !selectedUser.isSewadar) return
+    if (!selectedUser || !selectedUser.email) return
     setSaving(true)
     try {
-      const res = await updateUserAccess(selectedUser.email, selectedSystemRole, selectedPermissions)
-      if (res.error) {
-        toast.error(res.error)
-        setSaving(false)
-        return
+      if (selectedUser.isSewadar) {
+        const res = await updateUserAccess(
+          selectedUser.email,
+          selectedSystemRole,
+          selectedPermissions,
+          selectedShowInDirectory
+        )
+        if (res.error) {
+          toast.error(res.error)
+          setSaving(false)
+          return
+        }
+        toast.success(`Access updated for ${selectedUser.full_name || selectedUser.email}`)
+      } else {
+        const res = await registerVolunteer({
+          email: selectedUser.email,
+          full_name: selectedUser.full_name || '',
+          system_role: selectedSystemRole,
+          permissions: selectedPermissions,
+          is_field_volunteer: selectedShowInDirectory,
+          clerk_id: selectedUser.clerk_id || undefined,
+        })
+        if (res.error) {
+          toast.error(res.error)
+          setSaving(false)
+          return
+        }
+        toast.success(`Access set up for ${selectedUser.full_name || selectedUser.email}`)
       }
-      toast.success(`Access updated for ${selectedUser.full_name || selectedUser.email}`)
       queryClient.invalidateQueries({ queryKey: ['access-staff'] })
       onClose()
     } catch {
       toast.error('Failed to save changes')
     }
     setSaving(false)
-  }, [selectedUser, selectedPermissions, selectedSystemRole, queryClient, onClose])
-
-  const handleRegisterClick = useCallback(() => {
-    if (selectedUser && onRegisterAsSewadar) {
-      onRegisterAsSewadar(selectedUser)
-      onClose()
-    }
-  }, [selectedUser, onRegisterAsSewadar, onClose])
+  }, [selectedUser, selectedPermissions, selectedSystemRole, selectedShowInDirectory, queryClient, onClose])
 
   const displayName = selectedUser?.full_name || 'User'
   const isSewadar = selectedUser?.isSewadar === true
@@ -601,152 +566,138 @@ function AccessControlSheet({
             </SheetHeader>
 
             <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0 space-y-4 pb-28">
-              {isSewadar ? (
-                <>
-                  <div>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                      System Role
-                    </p>
-                    <Select
-                      value={selectedSystemRole}
-                      onValueChange={onRoleChange}
-                      disabled={hierarchyLock || currentIsModerator}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {!currentIsModerator && (
-                          <SelectItem value="admin">Admin</SelectItem>
-                        )}
-                        <SelectItem value="moderator">Moderator</SelectItem>
-                        <SelectItem value="volunteer">Volunteer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {(currentIsModerator || hierarchyLock) && (
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        {hierarchyLock ? 'Managed by Admins only.' : 'Only Admins can change system role.'}
-                      </p>
-                    )}
-                  </div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Permissions
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Enable a group with the switch, then expand to select individual permissions.
-                  </p>
-                  <Accordion
-                    type="multiple"
-                    defaultValue={[]}
-                    className={`w-full ${hierarchyLock ? 'pointer-events-none opacity-60' : ''}`}
-                  >
-                    {Object.entries(PERMISSION_GROUPS).map(([category, items]) => {
-                      const groupKeys = items.map((p) => p.key)
-                      const enabled = groupEnabled[category] ?? false
-                      const count = groupKeys.filter((k) => selectedPermissions.includes(k)).length
-                      const Icon = GROUP_ICONS[category] ?? Shield
-                      return (
-                        <AccordionItem
-                          key={category}
-                          value={category}
-                          className="border rounded-lg px-3 mb-2 bg-muted/30"
-                        >
-                          <AccordionTrigger className="py-3 hover:no-underline [&[data-state=open]>svg]:rotate-180">
-                            <div className="flex items-center gap-3 w-full pr-2">
-                              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                              <span className="text-sm font-medium text-left flex-1">{category}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {count}/{groupKeys.length}
-                              </span>
-                              <Switch
-                                checked={enabled}
-                                onCheckedChange={(checked) => setGroupMaster(category, checked)}
-                                onClick={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                disabled={hierarchyLock}
-                              />
-                            </div>
-                          </AccordionTrigger>
-                          <AccordionContent className="pb-3 pt-0">
-                            <div className="space-y-2">
-                              {items.map(({ key, label }) => (
-                                <div
-                                  key={key}
-                                  className={`flex items-center gap-3 rounded-md border px-3 py-2 ${!enabled ? 'opacity-50 bg-muted/50 pointer-events-none' : ''}`}
-                                >
-                                  <Checkbox
-                                    id={`perm-${key}`}
-                                    checked={selectedPermissions.includes(key)}
-                                    onCheckedChange={() => togglePermission(key)}
-                                    disabled={hierarchyLock || !enabled}
-                                  />
-                                  <label
-                                    htmlFor={`perm-${key}`}
-                                    className={`text-sm flex-1 ${enabled && !hierarchyLock ? 'cursor-pointer' : 'cursor-not-allowed'}`}
-                                  >
-                                    {label}
-                                  </label>
-                                </div>
-                              ))}
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                      )
-                    })}
-                  </Accordion>
-                </>
-              ) : (
-                <div className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    This user has signed in with Clerk but is not yet registered as a sewadar. Register them to assign permissions and link their account.
-                  </p>
-                  <Button
-                    className="w-full gap-2"
-                    size="lg"
-                    onClick={handleRegisterClick}
-                  >
-                    <UserPlus className="h-4 w-4" />
-                    Register as Sewadar
-                  </Button>
-                </div>
+              {!isSewadar && (
+                <p className="text-sm text-muted-foreground">
+                  This user has signed in with Clerk but is not in the directory yet. Assign a role and permissions to create their access.
+                </p>
               )}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  System Role
+                </p>
+                <Select
+                  value={selectedSystemRole}
+                  onValueChange={onRoleChange}
+                  disabled={hierarchyLock || currentIsModerator}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={isNewUser ? 'Pending' : undefined} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {!currentIsModerator && (
+                      <SelectItem value="admin">Admin</SelectItem>
+                    )}
+                    <SelectItem value="moderator">Moderator</SelectItem>
+                    <SelectItem value="volunteer">Volunteer</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(currentIsModerator || hierarchyLock) && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {hierarchyLock ? 'Managed by Admins only.' : 'Only Admins can change system role.'}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/30">
+                <div>
+                  <p className="text-sm font-medium">Show in Volunteer Directory</p>
+                  <p className="text-xs text-muted-foreground">List this person in the Volunteers tab</p>
+                </div>
+                <Switch
+                  checked={selectedShowInDirectory}
+                  onCheckedChange={setSelectedShowInDirectory}
+                  disabled={hierarchyLock}
+                />
+              </div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Permissions
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Enable a group with the switch, then expand to select individual permissions.
+              </p>
+              <Accordion
+                type="multiple"
+                defaultValue={[]}
+                className={`w-full ${hierarchyLock ? 'pointer-events-none opacity-60' : ''}`}
+              >
+                {Object.entries(PERMISSION_GROUPS).map(([category, items]) => {
+                  const groupKeys = items.map((p) => p.key)
+                  const enabled = groupEnabled[category] ?? false
+                  const count = groupKeys.filter((k) => selectedPermissions.includes(k)).length
+                  const Icon = GROUP_ICONS[category] ?? Shield
+                  return (
+                    <AccordionItem
+                      key={category}
+                      value={category}
+                      className="border rounded-lg px-3 mb-2 bg-muted/30"
+                    >
+                      <AccordionTrigger className="py-3 hover:no-underline [&[data-state=open]>svg]:rotate-180">
+                        <div className="flex items-center gap-3 w-full pr-2">
+                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="text-sm font-medium text-left flex-1">{category}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {count}/{groupKeys.length}
+                          </span>
+                          <Switch
+                            checked={enabled}
+                            onCheckedChange={(checked) => setGroupMaster(category, checked)}
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            disabled={hierarchyLock}
+                          />
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-3 pt-0">
+                        <div className="space-y-2">
+                          {items.map(({ key, label }) => (
+                            <div
+                              key={key}
+                              className={`flex items-center gap-3 rounded-md border px-3 py-2 ${!enabled ? 'opacity-50 bg-muted/50 pointer-events-none' : ''}`}
+                            >
+                              <Checkbox
+                                id={`perm-${key}`}
+                                checked={selectedPermissions.includes(key)}
+                                onCheckedChange={() => togglePermission(key)}
+                                disabled={hierarchyLock || !enabled}
+                              />
+                              <label
+                                htmlFor={`perm-${key}`}
+                                className={`text-sm flex-1 ${enabled && !hierarchyLock ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                              >
+                                {label}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )
+                })}
+              </Accordion>
             </div>
 
-            {isSewadar ? (
-              <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-background flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-12 flex-1 font-medium"
-                  onClick={onClose}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  className="h-12 flex-1 font-medium"
-                  disabled={!isDirty || saving || hierarchyLock}
-                  onClick={handleSave}
-                >
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-                  ) : (
-                    <Save className="h-4 w-4 mr-1.5" />
-                  )}
-                  Save Permissions
-                </Button>
-              </div>
-            ) : (
-              <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-background">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-12 w-full font-medium"
-                  onClick={onClose}
-                >
-                  Close
-                </Button>
-              </div>
-            )}
+            <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-background flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 flex-1 font-medium"
+                onClick={onClose}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="h-12 flex-1 font-medium"
+                disabled={(isSewadar && !isDirty) || saving || hierarchyLock}
+                onClick={handleSave}
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                ) : (
+                  <Save className="h-4 w-4 mr-1.5" />
+                )}
+                {isNewUser ? 'Setup Access' : 'Save Permissions'}
+              </Button>
+            </div>
           </>
         ) : null}
       </SheetContent>
@@ -761,9 +712,6 @@ export default function AccessManagementPage() {
   const queryClient = useQueryClient()
   const [selectedUser, setSelectedUser] = useState(null)
   const [isSheetOpen, setIsSheetOpen] = useState(false)
-  const [isPromoteOpen, setIsPromoteOpen] = useState(false)
-  const [registerDialogOpen, setRegisterDialogOpen] = useState(false)
-  const [registerPrefill, setRegisterPrefill] = useState(null)
   const canManageAccess = hasPermission('system:manage_access')
 
   const { data, isLoading } = useQuery({
@@ -788,23 +736,6 @@ export default function AccessManagementPage() {
     setSelectedUser(null)
   }, [])
 
-  const handlePromoteSelect = useCallback((user) => {
-    setSelectedUser(user)
-    setIsSheetOpen(true)
-  }, [])
-
-  const handleRegisterAsSewadar = useCallback((user) => {
-    setRegisterPrefill({
-      email: user.email || '',
-      full_name: user.full_name || '',
-    })
-    setRegisterDialogOpen(true)
-  }, [])
-
-  const handleRegisterSuccess = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['access-staff'] })
-  }, [queryClient])
-
   if (!canManageAccess) {
     return (
       <div className="flex items-center justify-center min-h-[60vh] text-center px-4">
@@ -822,20 +753,9 @@ export default function AccessManagementPage() {
   return (
     <div className="flex flex-col h-full max-w-2xl mx-auto w-full px-4 pb-20">
       <div className="shrink-0 pt-4 pb-3">
-        <div className="flex items-center justify-between gap-3 mb-1">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-primary" />
-            <h1 className="text-xl font-bold">Access Management</h1>
-          </div>
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => setIsPromoteOpen(true)}
-          >
-            <UserPlus className="h-4 w-4" />
-            <span className="hidden sm:inline">Grant Access</span>
-            <span className="sm:hidden">Promote</span>
-          </Button>
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+          <h1 className="text-xl font-bold">Access Management</h1>
         </div>
         <p className="text-sm text-muted-foreground">
           Unified directory: registered sewadars and Clerk users. Register users to assign permissions.
@@ -847,14 +767,6 @@ export default function AccessManagementPage() {
         isLoading={isLoading}
         currentUserSystemRole={currentUserSystemRole}
         onSelectUser={handleSelectUser}
-        onRegisterAsSewadar={handleRegisterAsSewadar}
-      />
-
-      <PromoteDialog
-        open={isPromoteOpen}
-        onOpenChange={setIsPromoteOpen}
-        staff={staff}
-        onSelect={handlePromoteSelect}
       />
 
       <AccessControlSheet
@@ -862,15 +774,7 @@ export default function AccessManagementPage() {
         open={isSheetOpen}
         onClose={handleCloseSheet}
         queryClient={queryClient}
-        onRegisterAsSewadar={handleRegisterAsSewadar}
         currentUserSystemRole={currentUserSystemRole}
-      />
-
-      <RegisterVolunteerModal
-        open={registerDialogOpen}
-        onOpenChange={setRegisterDialogOpen}
-        prefill={registerPrefill}
-        onSuccess={handleRegisterSuccess}
       />
     </div>
   )

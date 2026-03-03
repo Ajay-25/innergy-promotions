@@ -8,6 +8,13 @@
       "when": 1772485371882,
       "tag": "0000_boring_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772531102866,
+      "tag": "0001_nifty_smiling_tiger",
+      "breakpoints": true
     }
   ]
 }

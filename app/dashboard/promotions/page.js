@@ -157,7 +157,10 @@ export default function PromotionsPage() {
 
   const handleDialogOpenChange = (open) => {
     setDialogOpen(open)
-    if (!open) {
+    if (open) {
+      setFormData(INITIAL_FORM)
+      setIsGoldenMember(true)
+    } else {
       setFormData(INITIAL_FORM)
       setIsGoldenMember(false)
     }
@@ -178,7 +181,15 @@ export default function PromotionsPage() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold">App Promotions</h1>
-        <Button onClick={() => setDialogOpen(true)} size="sm" className="gap-1.5">
+        <Button
+          onClick={() => {
+            setFormData(INITIAL_FORM)
+            setIsGoldenMember(true)
+            setDialogOpen(true)
+          }}
+          size="sm"
+          className="gap-1.5"
+        >
           <Plus className="h-4 w-4" />
           Log Interaction
         </Button>
@@ -310,19 +321,19 @@ export default function PromotionsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   type="button"
-                  variant={!isGoldenMember ? 'default' : 'outline'}
-                  className="w-full"
-                  onClick={() => handleToggleGoldenMember(false)}
-                >
-                  No
-                </Button>
-                <Button
-                  type="button"
                   variant={isGoldenMember ? 'default' : 'outline'}
                   className="w-full"
                   onClick={() => handleToggleGoldenMember(true)}
                 >
                   Yes — Golden Member
+                </Button>
+                <Button
+                  type="button"
+                  variant={!isGoldenMember ? 'default' : 'outline'}
+                  className="w-full"
+                  onClick={() => handleToggleGoldenMember(false)}
+                >
+                  No
                 </Button>
               </div>
             </div>
@@ -395,28 +406,22 @@ export default function PromotionsPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                {formData.app_status === 'New Installation' && (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="citizen_name">Citizen Name</Label>
-                      <Input id="citizen_name" value={formData.citizen_name} onChange={set('citizen_name')} placeholder="Enter name" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="contact_number">Contact Number</Label>
-                      <Input id="contact_number" value={formData.contact_number} onChange={set('contact_number')} placeholder="Enter number" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email_used">Email</Label>
-                      <Input id="email_used" type="email" value={formData.email_used} onChange={set('email_used')} placeholder="Enter email" />
-                    </div>
-                  </>
-                )}
-                {formData.app_status && (
-                  <div className="space-y-2">
-                    <Label htmlFor="tech_issue_notes">Tech Issue Notes</Label>
-                    <Textarea id="tech_issue_notes" value={formData.tech_issue_notes} onChange={set('tech_issue_notes')} placeholder="Any technical issues encountered" rows={2} />
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <Label htmlFor="citizen_name">Citizen Name</Label>
+                  <Input id="citizen_name" value={formData.citizen_name} onChange={set('citizen_name')} placeholder="Enter name" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contact_number">Contact Number</Label>
+                  <Input id="contact_number" value={formData.contact_number} onChange={set('contact_number')} placeholder="Enter number" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email_used">Email</Label>
+                  <Input id="email_used" type="email" value={formData.email_used} onChange={set('email_used')} placeholder="Enter email" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tech_issue_notes">Tech Issue Notes</Label>
+                  <Textarea id="tech_issue_notes" value={formData.tech_issue_notes} onChange={set('tech_issue_notes')} placeholder="Any technical issues encountered" rows={2} />
+                </div>
               </>
             )}
 

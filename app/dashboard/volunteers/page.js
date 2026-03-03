@@ -43,6 +43,7 @@ import {
   ArrowLeft,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { getFieldVolunteers } from '@/app/actions/admin'
 import { PROFILE_TABS, DEPARTMENT_FIELDS, groupBySection } from '@/lib/field-configs'
 
 const sectionIcons = {
@@ -123,32 +124,33 @@ function useDebouncedValue(value, delay) {
   return debouncedValue
 }
 
-// --------------- Master list ---------------
-function VolunteerMasterList({ session, onSelectVolunteer, canEdit }) {
+// --------------- Master list (field volunteers only from sewadar_core) ---------------
+function VolunteerMasterList({ onSelectVolunteer, canEdit }) {
   const [searchInput, setSearchInput] = useState('')
-  const [page, setPage] = useState(0)
   const debouncedSearch = useDebouncedValue(searchInput, DEBOUNCE_MS)
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['volunteers', debouncedSearch, page],
+    queryKey: ['volunteers', 'field'],
     queryFn: async () => {
-      const params = new URLSearchParams({
-        search: debouncedSearch,
-        page: page.toString(),
-        pageSize: PAGE_SIZE.toString(),
-      })
-      const res = await fetch(`/api/admin/volunteers?${params}`, {
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      })
-      if (!res.ok) throw new Error('Failed to fetch volunteers')
-      return res.json()
+      const res = await getFieldVolunteers()
+      if (res.error) throw new Error(res.error)
+      const list = res.data ?? []
+      return { data: list, total: list.length }
     },
-    enabled: !!session,
   })
 
-  const totalPages = data ? Math.ceil((data.total || 0) / PAGE_SIZE) : 0
-  const volunteers = data?.data ?? []
-  const showLoading = isLoading || (isFetching && volunteers.length === 0)
+  const volunteers = useMemo(() => {
+    const list = data?.data ?? []
+    if (!debouncedSearch.trim()) return list
+    const q = debouncedSearch.toLowerCase()
+    return list.filter(
+      (v) =>
+        (v.full_name && String(v.full_name).toLowerCase().includes(q)) ||
+        (v.email && String(v.email).toLowerCase().includes(q))
+    )
+  }, [data?.data, debouncedSearch])
+
+  const showLoading = isLoading || (isFetching && (data?.data?.length ?? 0) === 0)
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -158,11 +160,11 @@ function VolunteerMasterList({ session, onSelectVolunteer, canEdit }) {
           <Input
             placeholder="Search by Name or Member ID..."
             value={searchInput}
-            onChange={(e) => { setSearchInput(e.target.value); setPage(0) }}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="pl-10 h-11"
           />
         </div>
-        <p className="text-xs text-muted-foreground mt-1.5">{data?.total ?? '—'} volunteers</p>
+        <p className="text-xs text-muted-foreground mt-1.5">{volunteers.length} volunteers</p>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto pt-3 space-y-2">
@@ -196,10 +198,9 @@ function VolunteerMasterList({ session, onSelectVolunteer, canEdit }) {
           </Card>
         ) : (
           volunteers.map((vol) => {
-            const pd = Array.isArray(vol.profiles_data) ? vol.profiles_data[0] : vol.profiles_data
-            const gender = pd?.gender || '--'
-            const center = pd?.department || '--'
-            const zone = pd?.region || '--'
+            const gender = vol.gender || '--'
+            const center = vol.center || '--'
+            const zone = vol.zone || '--'
             const pillClass = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-muted-foreground text-[11px] font-medium'
             return (
               <Card
@@ -220,9 +221,9 @@ function VolunteerMasterList({ session, onSelectVolunteer, canEdit }) {
                         <span className="font-semibold text-[15px] truncate">
                           {vol.full_name || 'Unnamed'}
                         </span>
-                        {vol.member_id && (
-                          <Badge variant="secondary" className="flex-shrink-0 text-[10px] font-mono">
-                            {vol.member_id}
+                        {vol.email && (
+                          <Badge variant="secondary" className="flex-shrink-0 text-[10px] font-mono max-w-[120px] truncate" title={vol.email}>
+                            {vol.email}
                           </Badge>
                         )}
                       </div>
@@ -248,40 +249,32 @@ function VolunteerMasterList({ session, onSelectVolunteer, canEdit }) {
           })
         )}
       </div>
-
-      {totalPages > 1 && (
-        <div className="shrink-0 bg-background border-t py-3 flex items-center justify-between px-1">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page === 0}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Previous
-          </Button>
-          <span className="text-xs text-muted-foreground">
-            Page {page + 1} of {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages - 1}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      )}
     </div>
   )
 }
 
-/** Normalize list item or API detail to { core, data } for the sheet. Handles Supabase returning profiles_data as object or single-element array. */
+/** Normalize list item or API detail to { core, data } for the sheet. Handles flat shape from getFieldVolunteers or Supabase profiles_data. */
 function toSheetVolunteer(selected) {
   if (!selected) return null
   const data = Array.isArray(selected.profiles_data) ? selected.profiles_data[0] : selected.profiles_data
-  const { profiles_data: _pd, ...core } = selected
-  return { core: core || {}, data: data || {} }
+  const { profiles_data: _pd, ...rest } = selected
+  if (data != null) {
+    return { core: rest || {}, data: data || {} }
+  }
+  return {
+    core: {
+      id: rest.id,
+      full_name: rest.full_name,
+      email: rest.email,
+      phone: rest.phone,
+      member_id: rest.member_id,
+    },
+    data: {
+      gender: rest.gender,
+      region: rest.zone,
+      department: rest.center,
+    },
+  }
 }
 
 // --------------- Detail Sheet (zero-fetch: data from selectedVolunteer, instant open) ---------------
@@ -782,7 +775,6 @@ export default function VolunteersPage() {
 
       <div className="flex flex-col max-h-[calc(100vh-14rem)] min-h-[320px]">
         <VolunteerMasterList
-          session={session}
           onSelectVolunteer={handleSelect}
           canEdit={canEdit}
         />

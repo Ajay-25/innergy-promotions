@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { DashboardProvider, useDashboard } from '@/contexts/DashboardContext'
+import { getOnboardingStatus } from '@/app/actions/onboarding'
 import { BottomNav } from '@/components/dashboard/BottomNav'
 import { canAccessRoute } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
@@ -87,6 +88,19 @@ function SetupView({ onRetry }) {
   )
 }
 
+function PendingApprovalView() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center max-w-md mx-auto">
+      <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-6">
+        <h1 className="text-lg font-semibold text-foreground mb-2">Welcome!</h1>
+        <p className="text-sm text-muted-foreground">
+          Your account is pending approval. An administrator will assign your access shortly.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function DashboardShell({ children }) {
   const {
     user,
@@ -101,21 +115,39 @@ function DashboardShell({ children }) {
   const pathname = usePathname()
   const router = useRouter()
   const lastDeniedRef = useRef('')
+  const [systemRoleFromDb, setSystemRoleFromDb] = useState(null)
 
   useEffect(() => {
     if (isLoading || needsSetup) return
 
-    const userCtx = { role, permissions: permissions ?? [] }
-    if (!canAccessRoute(userCtx, pathname)) {
-      if (lastDeniedRef.current !== pathname) {
-        lastDeniedRef.current = pathname
-        toast.error('Permission Denied', {
-          description: 'You don\u2019t have access to this section.',
-        })
-      }
-      router.replace('/dashboard/profile')
-    }
+    let cancelled = false
+    getOnboardingStatus()
+      .then(({ shouldRedirectToOnboarding, systemRole }) => {
+        if (cancelled) return
+        if (shouldRedirectToOnboarding) {
+          router.replace('/onboarding')
+          return
+        }
+        setSystemRoleFromDb(systemRole)
+        const userCtx = { role, permissions: permissions ?? [] }
+        if (!canAccessRoute(userCtx, pathname)) {
+          if (lastDeniedRef.current !== pathname) {
+            lastDeniedRef.current = pathname
+            toast.error('Permission Denied', {
+              description: 'You don\u2019t have access to this section.',
+            })
+          }
+          router.replace('/dashboard/profile')
+        }
+      })
+      .catch(() => {})
+
+    return () => { cancelled = true }
   }, [pathname, role, permissions, isLoading, needsSetup, router])
+
+  if (systemRoleFromDb === 'pending') {
+    return <PendingApprovalView />
+  }
 
   if (isLoading) {
     return (
