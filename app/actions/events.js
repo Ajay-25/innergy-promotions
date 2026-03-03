@@ -5,9 +5,10 @@ import { db } from '@/db'
 import {
   trainingEvents,
   eventAttendance,
+  eventOutreach,
   goldenMembers,
 } from '@/db/schema'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and } from 'drizzle-orm'
 
 /**
  * Fetch all training events.
@@ -96,23 +97,21 @@ export async function getEventAttendance(eventId) {
       goldenMemberId: eventAttendance.goldenMemberId,
       moduleAttended: eventAttendance.moduleAttended,
       status: eventAttendance.status,
-      fullName: goldenMembers.fullName,
-      contactNo: goldenMembers.contactNo,
-      innergyEmail: goldenMembers.innergyEmail,
+      name: goldenMembers.name,
+      phone: goldenMembers.phone,
     })
     .from(eventAttendance)
     .innerJoin(goldenMembers, eq(eventAttendance.goldenMemberId, goldenMembers.id))
     .where(eq(eventAttendance.eventId, eventId))
-    .orderBy(goldenMembers.fullName)
+    .orderBy(goldenMembers.name)
 
   return {
     data: rows.map((r) => ({
       id: r.id,
       event_id: r.eventId,
       golden_member_id: r.goldenMemberId,
-      full_name: r.fullName ?? '—',
-      contact_no: r.contactNo ?? '—',
-      innergy_email: r.innergyEmail ?? '—',
+      full_name: r.name ?? '—',
+      contact_no: r.phone ?? '—',
       module_attended: r.moduleAttended,
       status: r.status,
     })),
@@ -154,5 +153,88 @@ export async function updateEventAttendance(id, updates) {
     .set(payload)
     .where(eq(eventAttendance.id, id))
 
+  return { ok: true }
+}
+
+/**
+ * Full-list attendance: all golden members with their outreach and attendance for this event.
+ * Used for event detail page to show every CRM member with call status and Present toggle.
+ */
+export async function getEventFullAttendanceList(eventId) {
+  const user = await auth()
+  if (!user?.userId) return { error: 'Unauthorized', data: [] }
+
+  const members = await db
+    .select({
+      id: goldenMembers.id,
+      name: goldenMembers.name,
+      phone: goldenMembers.phone,
+      zone: goldenMembers.zone,
+    })
+    .from(goldenMembers)
+    .orderBy(goldenMembers.name)
+
+  const attendanceRows = await db
+    .select({
+      id: eventAttendance.id,
+      goldenMemberId: eventAttendance.goldenMemberId,
+      status: eventAttendance.status,
+    })
+    .from(eventAttendance)
+    .where(eq(eventAttendance.eventId, eventId))
+
+  const outreachRows = await db
+    .select({
+      memberId: eventOutreach.memberId,
+      callStatus: eventOutreach.callStatus,
+    })
+    .from(eventOutreach)
+    .where(eq(eventOutreach.eventId, eventId))
+
+  const attByMember = Object.fromEntries(attendanceRows.map((r) => [r.goldenMemberId, r]))
+  const outreachByMember = Object.fromEntries(outreachRows.map((r) => [r.memberId, r]))
+
+  return {
+    data: members.map((m) => {
+      const att = attByMember[m.id]
+      const o = outreachByMember[m.id]
+      return {
+        id: m.id,
+        name: m.name ?? '',
+        phone: m.phone ?? '',
+        zone: m.zone ?? '',
+        attendance_id: att?.id ?? null,
+        attendance_status: att?.status ?? null,
+        call_status: o?.callStatus ?? 'pending',
+      }
+    }),
+  }
+}
+
+/**
+ * Set one member's attendance status for an event (insert or update).
+ */
+export async function setEventAttendanceStatus(eventId, memberId, status) {
+  const user = await auth()
+  if (!user?.userId) return { error: 'Unauthorized' }
+
+  const [existing] = await db
+    .select({ id: eventAttendance.id })
+    .from(eventAttendance)
+    .where(and(eq(eventAttendance.eventId, eventId), eq(eventAttendance.goldenMemberId, memberId)))
+    .limit(1)
+
+  const validStatuses = ['Present', 'Absent', 'Potential', 'Confirmed']
+  if (!validStatuses.includes(status)) return { error: 'Invalid status' }
+
+  if (existing) {
+    await db.update(eventAttendance).set({ status }).where(eq(eventAttendance.id, existing.id))
+  } else {
+    await db.insert(eventAttendance).values({
+      eventId,
+      goldenMemberId: memberId,
+      status,
+    })
+  }
   return { ok: true }
 }

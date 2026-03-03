@@ -1,0 +1,2 @@
+ALTER TABLE "sewadar_attendance" ADD COLUMN "marked_by" uuid;--> statement-breakpoint
+ALTER TABLE "sewadar_attendance" ADD CONSTRAINT "sewadar_attendance_marked_by_sewadar_core_id_fk" FOREIGN KEY ("marked_by") REFERENCES "public"."sewadar_core"("id") ON DELETE set null ON UPDATE no action;

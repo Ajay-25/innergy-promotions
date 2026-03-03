@@ -1,68 +1,63 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useDashboard } from '@/contexts/DashboardContext'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Separator } from '@/components/ui/separator'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { FormField, FieldGroup } from '@/components/dashboard/form-fields'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Plus, Search, CalendarCheck, CalendarPlus, Clock, Loader2, Phone, Pencil, X } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
-  User,
-  Users,
-  Search,
-  Loader2,
-  Save,
-  Phone,
-  MapPin,
-  Package,
-  Pencil,
-  Mail,
-  CalendarDays,
-  Hash,
-  Map,
-  HeartHandshake,
-  Briefcase,
-  IdCard,
-  Shirt,
-  CalendarPlus,
-  Clock,
-  Activity,
-  Shield,
-  Heart,
-  FileText,
-  CheckCircle2,
-  BarChart3,
-  UserCog,
-  ArrowLeft,
-} from 'lucide-react'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { toast } from 'sonner'
-import { getFieldVolunteers } from '@/app/actions/admin'
-import { PROFILE_TABS, DEPARTMENT_FIELDS, groupBySection } from '@/lib/field-configs'
+import {
+  getSewadars,
+  getAttendance,
+  getRoster,
+  logAttendance,
+  logRoster,
+  updateAttendance,
+} from '@/app/actions/admin'
+import { RegisterVolunteerModal } from '@/app/dashboard/volunteers/components/RegisterVolunteerModal'
+import { VolunteerDetailSheet } from '@/app/dashboard/volunteers/components/VolunteerDetailSheet'
 
-const sectionIcons = {
-  'Permanent Address': <MapPin className="h-3.5 w-3.5 text-orange-500" />,
-  'Communication Address': <MapPin className="h-3.5 w-3.5 text-blue-500" />,
-  'Department & Region': <Shield className="h-3.5 w-3.5 text-teal-500" />,
-  'Initiation': <Heart className="h-3.5 w-3.5 text-red-500" />,
-  'Duty Areas - Permanent': <MapPin className="h-3.5 w-3.5 text-green-500" />,
-  'Duty Areas - Current': <MapPin className="h-3.5 w-3.5 text-cyan-500" />,
-  'Qualification': <FileText className="h-3.5 w-3.5 text-indigo-500" />,
-  'Profession': <Briefcase className="h-3.5 w-3.5 text-amber-500" />,
-  'I-Card & Uniform': <Package className="h-3.5 w-3.5 text-purple-500" />,
-  'Orientation': <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />,
-  'Status': <BarChart3 className="h-3.5 w-3.5 text-blue-500" />,
-  'Digital & Apps': <Phone className="h-3.5 w-3.5 text-pink-500" />,
-  'Preferences': <Heart className="h-3.5 w-3.5 text-rose-500" />,
-  'Data Metadata': <FileText className="h-3.5 w-3.5 text-gray-500" />,
-  'ID Proof': <FileText className="h-3.5 w-3.5 text-blue-500" />,
-  'Admin': <UserCog className="h-3.5 w-3.5 text-red-500" />,
+const SEWA_AREA_OPTIONS = ['Trainer', 'Promotion', 'Both']
+const AVAILABILITY_OPTIONS = ['Available', 'Tentative', 'Unavailable']
+const WEEKDAY_OPTIONS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const DAY_TO_SHORT = { Monday: 'M', Tuesday: 'Tu', Wednesday: 'W', Thursday: 'Th', Friday: 'F', Saturday: 'Sa' }
+
+function formatRoutineBadge(weeklyRoutine) {
+  if (!Array.isArray(weeklyRoutine) || weeklyRoutine.length === 0) return '—'
+  return weeklyRoutine.map((d) => DAY_TO_SHORT[d] || d.slice(0, 2)).join(' | ')
+}
+
+function formatShortDate(dateStr) {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return dateStr
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+}
+
+function getCurrentWeekStartLabel() {
+  const d = new Date()
+  const day = d.getDay()
+  const daysToMonday = day === 0 ? 6 : day - 1
+  const monday = new Date(d)
+  monday.setDate(d.getDate() - daysToMonday)
+  return monday.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
 function getInitials(name) {
@@ -70,725 +65,937 @@ function getInitials(name) {
   return name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
 }
 
-function useSheetSide() {
-  const [side, setSide] = useState('right')
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)')
-    setSide(mq.matches ? 'bottom' : 'right')
-    const fn = () => setSide(mq.matches ? 'bottom' : 'right')
-    mq.addEventListener('change', fn)
-    return () => mq.removeEventListener('change', fn)
-  }, [])
-  return side
+function getDefaultTime() {
+  const d = new Date()
+  const h = String(d.getHours()).padStart(2, '0')
+  const m = String(d.getMinutes()).padStart(2, '0')
+  return `${h}:${m}`
 }
 
-const PAGE_SIZE = 20
-const DEBOUNCE_MS = 300
-
-/**
- * List API response shape (GET /api/admin/volunteers) - smart fetch: core + explicit profiles_data for list + sheet.
- * @typedef {Object} VolunteerSheetData
- * @property {string} [contact_number]
- * @property {string} [email_id]
- * @property {string} [gender]
- * @property {string} [date_of_birth]
- * @property {string} [age]
- * @property {string} [permanent_address]
- * @property {string} [department]
- * @property {string} [region]
- * @property {string} [primary_duty_current]
- * @property {string} [primary_duty_permanent]
- * @property {string} [permanent_icard_status]
- * @property {string} [uniform]
- * @property {string} [date_of_joining]
- * @property {string} [years_of_membership]
- * @property {string} [active_status]
- */
-/**
- * @typedef {Object} VolunteerListItem
- * @property {string} id
- * @property {string} user_id
- * @property {string} [full_name]
- * @property {string} [member_id]
- * @property {string} [photo_url]
- * @property {string} [role]
- * @property {VolunteerSheetData | null} [profiles_data]
- */
-
-function useDebouncedValue(value, delay) {
-  const [debouncedValue, setDebouncedValue] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedValue(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return debouncedValue
+function getTodayDateString() {
+  return new Date().toISOString().slice(0, 10)
 }
 
-// --------------- Master list (field volunteers only from sewadar_core) ---------------
-function VolunteerMasterList({ onSelectVolunteer, canEdit }) {
-  const [searchInput, setSearchInput] = useState('')
-  const debouncedSearch = useDebouncedValue(searchInput, DEBOUNCE_MS)
+function getNextSundayDateString() {
+  const d = new Date()
+  const day = d.getDay()
+  const daysUntilSunday = day === 0 ? 7 : 7 - day
+  d.setDate(d.getDate() + daysUntilSunday)
+  return d.toISOString().slice(0, 10)
+}
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['volunteers', 'field'],
-    queryFn: async () => {
-      const res = await getFieldVolunteers()
-      if (res.error) throw new Error(res.error)
-      const list = res.data ?? []
-      return { data: list, total: list.length }
-    },
+function formatDate(d) {
+  if (!d) return '—'
+  const date = typeof d === 'string' ? new Date(d) : d
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+// ─── Volunteer Row Card (identity left, actions right on all breakpoints) ─────
+function VolunteerRowCard({ volunteer, onDetails, onMarkAttendance }) {
+  return (
+    <Card className="overflow-visible">
+      <CardContent className="p-0">
+        {/* Single row: identity (avatar + name/email/phone) left, Details + Mark Attendance right. */}
+        <div className="flex flex-row flex-nowrap items-center justify-between gap-3 p-4">
+          {/* Identity + contact: name, email, phone stack vertically; takes remaining space */}
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Avatar className="h-11 w-11 shrink-0 flex-shrink-0">
+              <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
+                {getInitials(volunteer.full_name)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-foreground break-words">
+                {volunteer.full_name || 'Unnamed'}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground break-all sm:mt-0.5" title={volunteer.email || ''}>
+                {volunteer.email || '—'}
+              </p>
+              <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground sm:mt-0">
+                <Phone className="h-3.5 w-3.5 shrink-0" />
+                <a href={volunteer.phone ? `tel:${volunteer.phone}` : undefined} className={volunteer.phone ? 'text-foreground hover:underline break-all' : 'text-muted-foreground'}>
+                  {volunteer.phone || '—'}
+                </a>
+              </p>
+            </div>
+          </div>
+
+          {/* Actions: always on the right (Details + Mark Attendance icon) */}
+          <div className="flex shrink-0 items-center gap-1">
+            {onMarkAttendance && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => onMarkAttendance(volunteer.id)}
+                title="Mark Attendance"
+              >
+                <CalendarCheck className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => onDetails?.(volunteer)}
+            >
+              Details
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+export default function VolunteersPage() {
+  const { hasPermission } = useDashboard()
+  const canViewAll = hasPermission('sewadars:view')
+  const canMarkAttendance = hasPermission('sewadars:mark_attendance')
+  const canEditAttendance = hasPermission('sewadars:edit_attendance')
+  const canCreateOrEditAttendance = canMarkAttendance || canEditAttendance
+
+  const [sewadars, setSewadars] = useState([])
+  const [attendance, setAttendance] = useState([])
+  const [roster, setRoster] = useState([])
+  const [rosterNextSunday, setRosterNextSunday] = useState('')
+  const [search, setSearch] = useState('')
+  const [registerOpen, setRegisterOpen] = useState(false)
+  const [attendanceOpen, setAttendanceOpen] = useState(false)
+  const [rosterOpen, setRosterOpen] = useState(false)
+  const searchParams = useSearchParams()
+  const [detailVolunteerId, setDetailVolunteerId] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const volunteerId = searchParams.get('volunteerId')
+    if (volunteerId) setDetailVolunteerId(volunteerId)
+  }, [searchParams])
+  const [submitting, setSubmitting] = useState(false)
+
+  const [attendanceDateFilter, setAttendanceDateFilter] = useState(getTodayDateString())
+  const [currentUserSewadarId, setCurrentUserSewadarId] = useState(null)
+  const [attendanceEditOpen, setAttendanceEditOpen] = useState(false)
+  const [attendanceEditRecord, setAttendanceEditRecord] = useState(null)
+  const [attendanceEditForm, setAttendanceEditForm] = useState({
+    date: '',
+    time_of_sewa: getDefaultTime(),
+    sewa_area: 'Trainer',
   })
 
-  const volunteers = useMemo(() => {
-    const list = data?.data ?? []
-    if (!debouncedSearch.trim()) return list
-    const q = debouncedSearch.toLowerCase()
-    return list.filter(
-      (v) =>
-        (v.full_name && String(v.full_name).toLowerCase().includes(q)) ||
-        (v.email && String(v.email).toLowerCase().includes(q))
-    )
-  }, [data?.data, debouncedSearch])
-
-  const showLoading = isLoading || (isFetching && (data?.data?.length ?? 0) === 0)
-
-  return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <div className="shrink-0 bg-background border-b pb-3 pt-1 px-1 -mx-1">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by Name or Member ID..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="pl-10 h-11"
-          />
-        </div>
-        <p className="text-xs text-muted-foreground mt-1.5">{volunteers.length} volunteers</p>
-      </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto pt-3 space-y-2">
-        {showLoading ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="p-3">
-              <CardContent className="p-0">
-                <div className="flex items-start gap-3">
-                  <Skeleton className="h-11 w-11 rounded-full shrink-0" />
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <div className="flex justify-between gap-2">
-                      <Skeleton className="h-4 flex-1 max-w-32" />
-                      <Skeleton className="h-5 w-14 shrink-0" />
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Skeleton className="h-5 w-12 rounded-md" />
-                      <Skeleton className="h-5 w-20 rounded-md" />
-                      <Skeleton className="h-5 w-14 rounded-md" />
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        ) : volunteers.length === 0 ? (
-          <Card>
-            <CardContent className="p-8 text-center text-muted-foreground">
-              <Users className="h-10 w-10 mx-auto mb-2 opacity-40" />
-              <p className="text-sm">No volunteers found</p>
-            </CardContent>
-          </Card>
-        ) : (
-          volunteers.map((vol) => {
-            const gender = vol.gender || '--'
-            const center = vol.center || '--'
-            const zone = vol.zone || '--'
-            const pillClass = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-muted-foreground text-[11px] font-medium'
-            return (
-              <Card
-                key={vol.id}
-                className="p-3 hover:bg-muted/50 transition-colors cursor-pointer"
-                onClick={() => onSelectVolunteer(vol)}
-              >
-                <CardContent className="p-0">
-                  <div className="flex items-start gap-3">
-                    <Avatar className="h-11 w-11 shrink-0">
-                      <AvatarImage src={vol.photo_url} alt={vol.full_name} />
-                      <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                        {getInitials(vol.full_name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <span className="font-semibold text-[15px] truncate">
-                          {vol.full_name || 'Unnamed'}
-                        </span>
-                        {vol.email && (
-                          <Badge variant="secondary" className="flex-shrink-0 text-[10px] font-mono max-w-[120px] truncate" title={vol.email}>
-                            {vol.email}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={pillClass}>
-                          <User className="h-3 w-3 shrink-0" />
-                          {gender}
-                        </span>
-                        <span className={`${pillClass} max-w-[120px] truncate`} title={center}>
-                          <MapPin className="h-3 w-3 shrink-0" />
-                          {center}
-                        </span>
-                        <span className={pillClass}>
-                          <Map className="h-3 w-3 shrink-0" />
-                          {zone}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })
-        )}
-      </div>
-    </div>
-  )
-}
-
-/** Normalize list item or API detail to { core, data } for the sheet. Handles flat shape from getFieldVolunteers or Supabase profiles_data. */
-function toSheetVolunteer(selected) {
-  if (!selected) return null
-  const data = Array.isArray(selected.profiles_data) ? selected.profiles_data[0] : selected.profiles_data
-  const { profiles_data: _pd, ...rest } = selected
-  if (data != null) {
-    return { core: rest || {}, data: data || {} }
-  }
-  return {
-    core: {
-      id: rest.id,
-      full_name: rest.full_name,
-      email: rest.email,
-      phone: rest.phone,
-      member_id: rest.member_id,
-    },
-    data: {
-      gender: rest.gender,
-      region: rest.zone,
-      department: rest.center,
-    },
-  }
-}
-
-// --------------- Detail Sheet (zero-fetch: data from selectedVolunteer, instant open) ---------------
-function VolunteerDetailSheet({
-  selectedVolunteer,
-  open,
-  onClose,
-  session,
-  canEdit,
-  setSelectedVolunteer,
-  queryClient,
-}) {
-  const sheetSide = useSheetSide()
-  const [isEditing, setIsEditing] = useState(false)
-  const [activeTab, setActiveTab] = useState('personal')
-  const [formData, setFormData] = useState({})
-  const [saving, setSaving] = useState(false)
-
-  const volunteer = useMemo(
-    () => (open && selectedVolunteer ? toSheetVolunteer(selectedVolunteer) : null),
-    [open, selectedVolunteer]
-  )
-
-  // Reset edit mode when sheet closes so next volunteer opens in read-only view
-  useEffect(() => {
-    if (!open) setIsEditing(false)
-  }, [open])
-
-  useEffect(() => {
-    if (volunteer?.core || volunteer?.data) {
-      setFormData({
-        ...(volunteer.data || {}),
-        user_id: volunteer.core?.user_id ?? '',
-        member_id: volunteer.core?.member_id ?? '',
-        first_name: volunteer.core?.first_name ?? '',
-        middle_name: volunteer.core?.middle_name ?? '',
-        last_name: volunteer.core?.last_name ?? '',
-        full_name: volunteer.core?.full_name ?? '',
-      })
-    }
-  }, [volunteer])
-
-  const handleChange = useCallback((key, value) => {
-    setFormData((prev) => ({ ...prev, [key]: value }))
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    const [sewRes, attRes, rosRes] = await Promise.all([
+      getSewadars(),
+      getAttendance(),
+      getRoster(),
+    ])
+    if (sewRes.data) setSewadars(sewRes.data)
+    if (attRes.data) setAttendance(attRes.data)
+    if (attRes.current_user_sewadar_id != null) setCurrentUserSewadarId(attRes.current_user_sewadar_id)
+    if (rosRes.data) setRoster(rosRes.data)
+    if (rosRes.nextSunday) setRosterNextSunday(rosRes.nextSunday)
+    setLoading(false)
   }, [])
 
-  const handleSave = useCallback(async () => {
-    const previous = selectedVolunteer
-    const targetUserId =
-      volunteer?.core?.user_id ?? selectedVolunteer?.user_id ?? formData.user_id
-    if (!targetUserId) {
-      console.warn(
-        '[VolunteerDetailSheet] Missing target_user_id: volunteer.core.user_id and selectedVolunteer.user_id are missing. Cannot save.'
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  const [attendanceForm, setAttendanceForm] = useState({
+    sewadar_id: '',
+    time_of_sewa: getDefaultTime(),
+    sewa_area: 'Trainer',
+  })
+
+  const [rosterForm, setRosterForm] = useState({
+    sewadar_id: '',
+    specific_date: '',
+    is_available_on_date: true,
+    event_remarks: '',
+    weekly_routine: [],
+  })
+
+  const sewadarById = Object.fromEntries(sewadars.map((s) => [s.id, s]))
+
+  useEffect(() => {
+    if (rosterOpen) {
+      const nextSun = rosterNextSunday || getNextSundayDateString()
+      setRosterForm((prev) => ({ ...prev, specific_date: nextSun }))
+    }
+  }, [rosterOpen, rosterNextSunday])
+
+  useEffect(() => {
+    if (!rosterForm.sewadar_id || !roster.length || !rosterNextSunday) return
+    const entry = roster.find((r) => r.sewadar_id === rosterForm.sewadar_id)
+    if (!entry) return
+    const forDate = entry.specific_entries?.find((e) => e.planned_date === rosterNextSunday)
+    setRosterForm((prev) => ({
+      ...prev,
+      specific_date: rosterNextSunday,
+      is_available_on_date: forDate ? forDate.is_available_on_date : true,
+      weekly_routine: Array.isArray(entry.weekly_routine) ? [...entry.weekly_routine] : [],
+    }))
+  }, [rosterForm.sewadar_id, roster, rosterNextSunday])
+
+  const toggleRosterWeekday = (day) => {
+    setRosterForm((prev) => {
+      const next = prev.weekly_routine.includes(day)
+        ? prev.weekly_routine.filter((d) => d !== day)
+        : [...prev.weekly_routine, day]
+      return { ...prev, weekly_routine: next }
+    })
+  }
+
+  const filteredSewadars = useMemo(
+    () =>
+      sewadars.filter(
+        (s) =>
+          (s.full_name && s.full_name.toLowerCase().includes(search.toLowerCase())) ||
+          (s.email && s.email.toLowerCase().includes(search.toLowerCase()))
+      ),
+    [sewadars, search]
+  )
+
+  const filteredAttendance = useMemo(
+    () => attendance.filter((a) => a.date === attendanceDateFilter),
+    [attendance, attendanceDateFilter]
+  )
+
+  const [rosterFilterConfig, setRosterFilterConfig] = useState({
+    activeFilter: 'all',
+    specificDay: '',
+  })
+  const [rosterSearch, setRosterSearch] = useState('')
+
+  const filteredRoster = useMemo(() => {
+    let list = roster
+
+    if (rosterSearch.trim()) {
+      const q = rosterSearch.toLowerCase().trim()
+      list = list.filter(
+        (r) =>
+          (r.sewadar_name && r.sewadar_name.toLowerCase().includes(q)) ||
+          (r.sewadar_id && String(r.sewadar_id).toLowerCase().includes(q))
       )
-      toast.error('Cannot save: volunteer user ID is missing.')
+    }
+
+    if (rosterFilterConfig.activeFilter !== 'all') {
+      list = list.filter((r) => {
+        const sundayEntry = r.specific_entries?.find((e) => e.planned_date === rosterNextSunday)
+        switch (rosterFilterConfig.activeFilter) {
+          case 'available_sunday':
+            return sundayEntry != null && sundayEntry.is_available_on_date === true
+          case 'unavailable_sunday':
+            return sundayEntry != null && sundayEntry.is_available_on_date === false
+          default:
+            return true
+        }
+      })
+    }
+
+    if (rosterFilterConfig.specificDay) {
+      list = list.filter((r) =>
+        Array.isArray(r.weekly_routine) && r.weekly_routine.includes(rosterFilterConfig.specificDay)
+      )
+    }
+
+    return list
+  }, [roster, rosterFilterConfig, rosterNextSunday, rosterSearch])
+
+  const trainerCount = sewadars.filter((s) => s.sewa_type === 'Trainer' || s.sewa_type === 'Both').length
+  const promoterCount = sewadars.filter((s) => s.sewa_type === 'Promotion' || s.sewa_type === 'Both').length
+
+  const openAttendanceDialog = (sewadarId = null) => {
+    setAttendanceForm({
+      sewadar_id: sewadarId || '',
+      time_of_sewa: getDefaultTime(),
+      sewa_area: 'Trainer',
+    })
+    setAttendanceOpen(true)
+  }
+
+  const closeAttendanceDialog = () => {
+    setAttendanceOpen(false)
+  }
+
+  const handleAttendanceSubmit = async (e) => {
+    e.preventDefault()
+    const sewadar = sewadarById[attendanceForm.sewadar_id]
+    if (!sewadar) return
+    setSubmitting(true)
+    const res = await logAttendance({
+      sewadar_id: attendanceForm.sewadar_id,
+      date: attendanceDateFilter,
+      time_of_sewa: attendanceForm.time_of_sewa,
+      sewa_area: attendanceForm.sewa_area,
+    })
+    setSubmitting(false)
+    if (res.error) {
+      toast.error(res.error)
       return
     }
-    const {
-      member_id,
-      first_name,
-      middle_name,
-      last_name,
-      full_name,
-      id,
-      user_id,
-      created_at,
-      updated_at,
-      ...dataFields
-    } = formData
-    const computedFullName =
-      [first_name, middle_name, last_name].filter(Boolean).join(' ') || full_name
-    const optimisticCore = {
-      ...(volunteer?.core || {}),
-      member_id: member_id ?? volunteer?.core?.member_id,
-      first_name: first_name ?? volunteer?.core?.first_name,
-      middle_name: middle_name ?? volunteer?.core?.middle_name,
-      last_name: last_name ?? volunteer?.core?.last_name,
-      full_name: computedFullName,
-    }
-    const optimisticData = { ...(volunteer?.data || {}), ...dataFields }
-    const optimisticDetail = {
-      ...volunteer,
-      core: optimisticCore,
-      data: optimisticData,
-    }
+    setAttendanceForm({ sewadar_id: '', time_of_sewa: getDefaultTime(), sewa_area: 'Trainer' })
+    closeAttendanceDialog()
+    toast.success('Attendance marked successfully')
+    const attRes = await getAttendance()
+    if (attRes.data) setAttendance(attRes.data)
+    if (attRes.current_user_sewadar_id != null) setCurrentUserSewadarId(attRes.current_user_sewadar_id)
+  }
 
-    const optimisticListItem = { ...optimisticCore, profiles_data: optimisticData }
-    setSelectedVolunteer(optimisticListItem)
-    queryClient.setQueriesData({ queryKey: ['volunteers'] }, (old) => {
-      if (!old?.data) return old
-      return {
-        ...old,
-        data: old.data.map((v) =>
-          (v.user_id ?? v.id) === targetUserId
-            ? { ...v, full_name: optimisticCore.full_name, member_id: optimisticCore.member_id, photo_url: optimisticCore.photo_url ?? v.photo_url, profiles_data: optimisticData }
-            : v
-        ),
-      }
+  const canEditAttendanceRecord = (a) => {
+    if (canEditAttendance) return true
+    if (!a.marked_by || !currentUserSewadarId) return false
+    return String(a.marked_by) === String(currentUserSewadarId)
+  }
+
+  const openAttendanceEdit = (a) => {
+    setAttendanceEditRecord(a)
+    setAttendanceEditForm({
+      date: a.date || attendanceDateFilter,
+      time_of_sewa: a.time_of_sewa || getDefaultTime(),
+      sewa_area: a.sewa_area || 'Trainer',
     })
-    setIsEditing(false)
-    setSaving(true)
+    setAttendanceEditOpen(true)
+  }
 
+  const closeAttendanceEdit = () => {
+    setAttendanceEditOpen(false)
+    setAttendanceEditRecord(null)
+  }
+
+  const handleAttendanceEditSubmit = async (e) => {
+    e.preventDefault()
+    if (!attendanceEditRecord) return
+    setSubmitting(true)
     try {
-      const res = await fetch('/api/admin/volunteer-update', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          target_user_id: targetUserId,
-          core: { member_id, first_name, middle_name, last_name, full_name: computedFullName },
-          data: dataFields,
-        }),
+      const res = await updateAttendance(attendanceEditRecord.id, {
+        date: attendanceEditForm.date,
+        time_of_sewa: attendanceEditForm.time_of_sewa,
+        sewa_area: attendanceEditForm.sewa_area,
       })
-      if (res.ok) {
-        toast.success('Changes saved')
-      } else {
-        const err = await res.json().catch(() => ({}))
-        setSelectedVolunteer(previous)
-        queryClient.invalidateQueries({ queryKey: ['volunteers'] })
-        toast.error(err.error || 'Save failed')
+      if (res.error) {
+        toast.error(res.error)
+        return
       }
-    } catch {
-      setSelectedVolunteer(previous)
-      queryClient.invalidateQueries({ queryKey: ['volunteers'] })
-      toast.error('Save failed')
+      closeAttendanceEdit()
+      toast.success('Attendance updated')
+      const attRes = await getAttendance()
+      if (attRes.data) setAttendance(attRes.data)
+    } finally {
+      setSubmitting(false)
     }
-    setSaving(false)
-  }, [formData, session, queryClient, volunteer, selectedVolunteer, setSelectedVolunteer])
+  }
 
-  const displayName = volunteer?.core?.full_name || formData.full_name || 'Volunteer'
-  const core = volunteer?.core ?? {}
-  const data = volunteer?.data ?? {}
-  const showContent = !!volunteer
+  const handleRosterSubmit = async (e) => {
+    e.preventDefault()
+    const sewadar = sewadarById[rosterForm.sewadar_id]
+    if (!sewadar) return
+    const hasSpecific = rosterForm.specific_date != null && rosterForm.specific_date !== ''
+    const hasRoutine = Array.isArray(rosterForm.weekly_routine)
+    if (!hasSpecific && !hasRoutine) {
+      toast.error('Set at least upcoming Sunday availability or general weekdays.')
+      return
+    }
+    setSubmitting(true)
+    const res = await logRoster({
+      sewadar_id: rosterForm.sewadar_id,
+      specific_date: hasSpecific ? rosterForm.specific_date : undefined,
+      is_available_on_date: rosterForm.is_available_on_date,
+      event_remarks: rosterForm.event_remarks || '',
+      weekly_routine: hasRoutine ? rosterForm.weekly_routine : undefined,
+    })
+    setSubmitting(false)
+    if (res.error) {
+      toast.error(res.error)
+      return
+    }
+    setRosterForm({
+      sewadar_id: '',
+      specific_date: rosterNextSunday || '',
+      is_available_on_date: true,
+      event_remarks: '',
+      weekly_routine: [],
+    })
+    setRosterOpen(false)
+    toast.success('Availability saved')
+    const rosRes = await getRoster()
+    if (rosRes.data) setRoster(rosRes.data)
+    if (rosRes.nextSunday) setRosterNextSunday(rosRes.nextSunday)
+  }
 
-  const sheetContentClass =
-    sheetSide === 'bottom'
-      ? 'h-[90vh] overflow-hidden flex flex-col rounded-t-2xl p-0'
-      : 'w-full max-w-lg overflow-hidden flex flex-col sm:max-w-xl p-0'
-
-  return (
-    <Sheet
-      open={open}
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          setSelectedVolunteer(null)
-          setIsEditing(false)
-          setActiveTab('personal')
-          onClose()
-        }
-      }}
-    >
-      <SheetContent
-        side={sheetSide}
-        className={`${sheetContentClass} [&>button.absolute]:hidden`}
-        onPointerDownOutside={(e) => isEditing && e.preventDefault()}
-        onInteractOutside={(e) => isEditing && e.preventDefault()}
-      >
-        {isEditing ? (
-          <>
-            <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0 text-left">
-              <SheetTitle>Edit Volunteer: {displayName}</SheetTitle>
-            </SheetHeader>
-            <div className="flex-1 flex flex-col min-h-0">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-                <div className="sticky top-0 z-10 bg-background border-b shrink-0 px-4 pt-2 pb-2 -mx-4 px-4">
-                  <div className="overflow-x-auto -mx-2 px-2">
-                    <TabsList className="inline-flex w-auto min-w-full h-9">
-                      {PROFILE_TABS.map((tab) => (
-                        <TabsTrigger
-                          key={tab.id}
-                          value={tab.id}
-                          className="text-[11px] px-2.5 whitespace-nowrap"
-                        >
-                          {tab.label}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto px-4 py-3 pb-24 min-h-0">
-                  {PROFILE_TABS.map((tab) => {
-                    const sections = groupBySection(tab.fields)
-                    const hasSections = Object.keys(sections).some((s) => s !== 'General')
-                    return (
-                      <TabsContent key={tab.id} value={tab.id} className="mt-0 space-y-4 data-[state=inactive]:hidden">
-                        {hasSections ? (
-                          Object.entries(sections).map(([section, fields]) => (
-                            <FieldGroup
-                              key={section}
-                              title={section}
-                              icon={sectionIcons[section] || null}
-                              fields={fields}
-                              formData={formData}
-                              onChange={handleChange}
-                            />
-                          ))
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            {tab.fields.map((f) => (
-                              <FormField
-                                key={f.key}
-                                field={f}
-                                value={formData[f.key]}
-                                onChange={handleChange}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </TabsContent>
-                    )
-                  })}
-                </div>
-              </Tabs>
-            </div>
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-background border-t flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-12 flex-1 font-medium"
-                onClick={() => {
-                  setActiveTab('personal')
-                  setIsEditing(false)
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                className="h-12 flex-1 font-medium"
-                disabled={saving}
-                onClick={handleSave}
-              >
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-                Save Changes
-              </Button>
-            </div>
-          </>
-        ) : showContent ? (
-          <>
-            <SheetHeader
-              className={`relative px-4 pt-4 pb-3 border-b shrink-0 text-left ${sheetSide === 'right' && canEdit ? 'pr-20' : 'pr-12'}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <Avatar className="h-14 w-14 shrink-0 border-2 border-background shadow">
-                    <AvatarImage src={volunteer?.core?.photo_url} alt={displayName} />
-                    <AvatarFallback className="bg-primary/15 text-primary text-lg font-semibold">
-                      {getInitials(displayName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <SheetTitle className="text-xl font-bold text-foreground truncate">
-                      {core.full_name || '--'}
-                    </SheetTitle>
-                    {core.member_id && (
-                      <Badge variant="secondary" className="font-mono mt-1">
-                        {core.member_id}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-                {canEdit && (
-                  sheetSide === 'right' ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="absolute right-12 top-4 z-10 h-9 w-9 shrink-0 bg-background"
-                      onClick={() => setIsEditing(true)}
-                      aria-label="Edit volunteer"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 shrink-0"
-                      onClick={() => setIsEditing(true)}
-                      aria-label="Edit volunteer"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                  )
-                )}
-              </div>
-            </SheetHeader>
-
-            <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                  <TabsList className="grid w-full grid-cols-2 h-10 mb-4">
-                    <TabsTrigger value="personal" className="gap-1.5 text-xs">
-                      <User className="h-3.5 w-3.5" />
-                      Personal Info
-                    </TabsTrigger>
-                    <TabsTrigger value="sewa" className="gap-1.5 text-xs">
-                      <MapPin className="h-3.5 w-3.5" />
-                      Department Details
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="personal" className="mt-0">
-                    <Card>
-                      <CardContent className="pt-4 pb-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="flex items-start gap-3">
-                            <Phone className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider">Contact Number</p>
-                              <p className="text-sm font-medium">{data.contact_number || '--'}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3">
-                            <Mail className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider">Email</p>
-                              <p className="text-sm font-medium">{data.email_id || '--'}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3">
-                            <User className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider">Gender</p>
-                              <p className="text-sm font-medium">{data.gender || '--'}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3">
-                            <CalendarDays className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider">Date of Birth</p>
-                              <p className="text-sm font-medium">{data.date_of_birth || '--'}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3">
-                            <Hash className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider">Age</p>
-                              <p className="text-sm font-medium">{data.age != null && data.age !== '' ? String(data.age) : '--'}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3 md:col-span-2">
-                            <MapPin className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs text-muted-foreground uppercase tracking-wider">Address</p>
-                              <p className="text-sm font-medium break-words">{data.permanent_address || '--'}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-
-                  <TabsContent value="sewa" className="mt-0">
-                    <Card>
-                      <CardContent className="pt-4 pb-4 space-y-6">
-                        <section>
-                          <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">
-                            Department Details
-                          </h3>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="flex items-start gap-3">
-                              <MapPin className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Department</p>
-                                <p className="text-sm font-medium">{data.department || '--'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <Map className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Region</p>
-                                <p className="text-sm font-medium">{data.region || '--'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <HeartHandshake className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Primary Duty (Current)</p>
-                                <p className="text-sm font-medium">{data.primary_duty_current || '--'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <Briefcase className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Primary Duty (Permanent)</p>
-                                <p className="text-sm font-medium">{data.primary_duty_permanent || '--'}</p>
-                              </div>
-                            </div>
-                          </div>
-                        </section>
-                        <Separator className="my-4" />
-                        <section>
-                          <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">
-                            YA Details
-                          </h3>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="flex items-start gap-3">
-                              <IdCard className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Permanent I-Card Status</p>
-                                <p className="text-sm font-medium">{data.permanent_icard_status || '--'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <Shirt className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Uniform</p>
-                                <p className="text-sm font-medium">{data.uniform || '--'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <CalendarPlus className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Date of Joining / Orientation</p>
-                                <p className="text-sm font-medium">{data.date_of_joining || '--'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <Clock className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Years of Membership</p>
-                                <p className="text-sm font-medium">{data.years_of_membership != null && data.years_of_membership !== '' ? String(data.years_of_membership) : '--'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                              <Activity className="w-5 h-5 text-muted-foreground mt-0.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wider">Active Status</p>
-                                <p className="text-sm font-medium">{data.active_status || '--'}</p>
-                              </div>
-                            </div>
-                          </div>
-                        </section>
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-                </Tabs>
-            </div>
-            <div className="shrink-0 px-4 pb-4 pt-2 border-t bg-background">
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                onClick={() => {
-                  setSelectedVolunteer(null)
-                  setActiveTab('personal')
-                  onClose()
-                }}
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Button>
-            </div>
-          </>
-        ) : null}
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-// --------------- Page ---------------
-export default function VolunteersPage() {
-  const { session, role, accessibleModules } = useDashboard()
-  const queryClient = useQueryClient()
-  const [isSheetOpen, setIsSheetOpen] = useState(false)
-  /** @type {[VolunteerListItem | { core: object, data: object } | null, React.Dispatch<React.SetStateAction<VolunteerListItem | { core: object, data: object } | null>>]} */
-  const [selectedVolunteer, setSelectedVolunteer] = useState(null)
-
-  const modules = accessibleModules ?? []
-  const canEdit =
-    role === 'admin' ||
-    (Array.isArray(modules) &&
-      (modules.includes('profile_edit') || modules.includes('directory:edit') || modules.includes('directory_edit')))
-
-  const handleSelect = useCallback((vol) => {
-    setSelectedVolunteer(vol)
-    setIsSheetOpen(true)
-  }, [])
-
-  const handleCloseSheet = useCallback(() => {
-    setIsSheetOpen(false)
-    setSelectedVolunteer(null)
-  }, [])
-
-  return (
-    <div className="p-4 pb-6 flex flex-col">
-      <div className="shrink-0 mb-3">
-        <h2 className="text-lg font-bold">Volunteers</h2>
-        <p className="text-xs text-muted-foreground">
-          Search and view volunteer profiles
-        </p>
+  if (loading) {
+    return (
+      <div className="p-4 flex items-center justify-center min-h-[200px]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
+    )
+  }
 
-      <div className="flex flex-col max-h-[calc(100vh-14rem)] min-h-[320px]">
-        <VolunteerMasterList
-          onSelectVolunteer={handleSelect}
-          canEdit={canEdit}
+  return (
+    <div className="p-4 space-y-3 pb-20">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h1 className="text-lg font-bold">Volunteers</h1>
+        <Button onClick={() => setRegisterOpen(true)} size="sm" className="gap-1.5">
+          <Plus className="h-4 w-4" />
+          Register Volunteer
+        </Button>
+        <RegisterVolunteerModal
+          open={registerOpen}
+          onOpenChange={setRegisterOpen}
+          prefill={null}
+          onSuccess={loadData}
+        />
+        <VolunteerDetailSheet
+          volunteerId={detailVolunteerId}
+          open={!!detailVolunteerId}
+          onClose={() => setDetailVolunteerId(null)}
+          onSuccess={loadData}
         />
       </div>
 
-      <VolunteerDetailSheet
-        selectedVolunteer={selectedVolunteer}
-        open={isSheetOpen}
-        onClose={handleCloseSheet}
-        session={session}
-        canEdit={canEdit}
-        setSelectedVolunteer={setSelectedVolunteer}
-        queryClient={queryClient}
-      />
+      <div className="flex items-center gap-2 overflow-x-auto py-2 px-3 rounded-md bg-muted/50 text-muted-foreground text-sm min-h-[2.5rem] shrink-0 no-scrollbar">
+        <span className="shrink-0">Total: {sewadars.length}</span>
+        <span className="shrink-0 text-muted-foreground/60" aria-hidden>|</span>
+        <span className="shrink-0">Trainers: {trainerCount}</span>
+        <span className="shrink-0 text-muted-foreground/60" aria-hidden>|</span>
+        <span className="shrink-0">Promoters: {promoterCount}</span>
+      </div>
+
+      <Tabs defaultValue="directory" className="space-y-3">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="directory">Directory</TabsTrigger>
+          <TabsTrigger value="attendance">Daily Attendance</TabsTrigger>
+          <TabsTrigger value="roster">Upcoming Roster</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="directory" className="space-y-4">
+          {!canViewAll ? (
+            <Card>
+              <CardContent className="py-10 text-center text-muted-foreground">
+                <p className="font-medium">Restricted Access</p>
+                <p className="text-sm mt-1">You do not have permission to view the volunteer directory.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by name or email..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              {filteredSewadars.length === 0 ? (
+                <Card>
+                  <CardContent className="py-10 text-center text-muted-foreground">
+                    No volunteers match your search.
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-3">
+                  {filteredSewadars.map((s) => (
+                    <VolunteerRowCard
+                      key={s.id}
+                      volunteer={s}
+                      onMarkAttendance={canMarkAttendance ? openAttendanceDialog : undefined}
+                      onDetails={(v) => setDetailVolunteerId(v?.id ?? null)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="attendance" className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="attendance-date" className="text-sm whitespace-nowrap">
+                Date
+              </Label>
+              <Input
+                id="attendance-date"
+                type="date"
+                value={attendanceDateFilter}
+                onChange={(e) => setAttendanceDateFilter(e.target.value)}
+                className="w-[160px]"
+              />
+            </div>
+            {canCreateOrEditAttendance && (
+              <Button size="sm" className="gap-1.5 w-fit" onClick={() => openAttendanceDialog()}>
+                <Clock className="h-4 w-4" />
+                Mark Attendance
+              </Button>
+            )}
+          </div>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Volunteer</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Sewa Area</TableHead>
+                  <TableHead>Sewa Performed</TableHead>
+                  <TableHead className="w-[80px] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredAttendance.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                      No attendance recorded for this date.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredAttendance.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell className="font-medium">{a.sewadar_name}</TableCell>
+                      <TableCell className="text-xs">
+                        {sewadarById[a.sewadar_id]?.email ?? '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{a.date}</Badge>
+                      </TableCell>
+                      <TableCell>{a.time_of_sewa ?? '—'}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{a.sewa_area ?? '—'}</Badge>
+                      </TableCell>
+                      <TableCell>{a.sewa_performed}</TableCell>
+                      <TableCell className="text-right">
+                        {canEditAttendanceRecord(a) ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openAttendanceEdit(a)
+                            }}
+                            title="Edit attendance"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="roster" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+              <span>
+                Next Sunday: <strong className="text-foreground">{rosterNextSunday ? formatShortDate(rosterNextSunday) : '—'}</strong>
+              </span>
+              <span className="text-muted-foreground/70">|</span>
+              <span>
+                Current week: <strong className="text-foreground">from {getCurrentWeekStartLabel()}</strong>
+              </span>
+            </div>
+            <Button size="sm" className="gap-1.5" onClick={() => setRosterOpen(true)}>
+              <CalendarPlus className="h-4 w-4" />
+              Add Availability
+            </Button>
+          </div>
+
+          {/* Roster Toolbar: search (left) + filters (right) */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-[240px]">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search volunteers..."
+                value={rosterSearch}
+                onChange={(e) => setRosterSearch(e.target.value)}
+                className="pl-8 h-9"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ToggleGroup
+                type="single"
+                value={rosterFilterConfig.activeFilter}
+                onValueChange={(v) => v != null && setRosterFilterConfig((prev) => ({ ...prev, activeFilter: v }))}
+                className="inline-flex rounded-md border p-0.5 bg-muted/30"
+              >
+                <ToggleGroupItem value="all" aria-label="All" className="px-3 text-xs data-[state=on]:bg-background">
+                  All
+                </ToggleGroupItem>
+                <ToggleGroupItem value="available_sunday" aria-label="Available" className="px-3 text-xs data-[state=on]:bg-background">
+                  Available
+                </ToggleGroupItem>
+                <ToggleGroupItem value="unavailable_sunday" aria-label="Unavailable" className="px-3 text-xs data-[state=on]:bg-background">
+                  Unavailable
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 gap-1.5 min-w-[7rem] justify-between">
+                    <span className="truncate">
+                      {rosterFilterConfig.specificDay ? (
+                        <>
+                          Routine: {DAY_TO_SHORT[rosterFilterConfig.specificDay] ?? rosterFilterConfig.specificDay}
+                          <button
+                            type="button"
+                            className="ml-1.5 inline-flex rounded p-0.5 hover:bg-muted"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setRosterFilterConfig((prev) => ({ ...prev, specificDay: '' }))
+                            }}
+                            aria-label="Clear day"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </>
+                      ) : (
+                        'Routine Day'
+                      )}
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[8rem]">
+                  {WEEKDAY_OPTIONS.map((day) => (
+                    <DropdownMenuItem
+                      key={day}
+                      onClick={() => setRosterFilterConfig((prev) => ({ ...prev, specificDay: day }))}
+                    >
+                      {DAY_TO_SHORT[day]}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
+          {/* Active filter badges (removable) */}
+          {(rosterFilterConfig.activeFilter !== 'all' || rosterFilterConfig.specificDay) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {rosterFilterConfig.activeFilter !== 'all' && (
+                <Badge variant="secondary" className="gap-1 py-0.5 pl-2 pr-1 text-xs font-normal">
+                  Sunday: {rosterFilterConfig.activeFilter === 'available_sunday' ? 'Available' : 'Unavailable'}
+                  <button
+                    type="button"
+                    className="rounded p-0.5 hover:bg-muted-foreground/20"
+                    onClick={() => setRosterFilterConfig((prev) => ({ ...prev, activeFilter: 'all' }))}
+                    aria-label="Clear"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              )}
+              {rosterFilterConfig.specificDay && (
+                <Badge variant="secondary" className="gap-1 py-0.5 pl-2 pr-1 text-xs font-normal">
+                  {rosterFilterConfig.specificDay}
+                  <button
+                    type="button"
+                    className="rounded p-0.5 hover:bg-muted-foreground/20"
+                    onClick={() => setRosterFilterConfig((prev) => ({ ...prev, specificDay: '' }))}
+                    aria-label="Clear"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Volunteer</TableHead>
+                  <TableHead>Sunday Status</TableHead>
+                  <TableHead>Routine</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {roster.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
+                      No roster data yet. Add availability to see volunteers here.
+                    </TableCell>
+                  </TableRow>
+                ) : filteredRoster.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
+                      No volunteers found for this filter.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredRoster.map((r) => {
+                    const sundayEntry = r.specific_entries?.find((e) => e.planned_date === rosterNextSunday)
+                    const available = sundayEntry?.is_available_on_date
+                    const sundayLabel =
+                      sundayEntry == null
+                        ? '—'
+                        : available === true
+                          ? `Available on ${formatShortDate(rosterNextSunday)}`
+                          : available === false
+                            ? `Unavailable on ${formatShortDate(rosterNextSunday)}`
+                            : 'Not Responded'
+                    return (
+                      <TableRow key={r.sewadar_id}>
+                        <TableCell className="font-medium">{r.sewadar_name}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={available === false ? 'secondary' : 'outline'}
+                            className={
+                              available === true
+                                ? 'bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30'
+                                : available === null || available === undefined
+                                  ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
+                                  : undefined
+                            }
+                          >
+                            {sundayLabel}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-mono text-muted-foreground">
+                            {formatRoutineBadge(r.weekly_routine)}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Mark Attendance Dialog */}
+      <Dialog open={attendanceOpen} onOpenChange={(open) => !open && closeAttendanceDialog()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark Attendance</DialogTitle>
+            <DialogDescription>Record daily sewa attendance for a volunteer.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAttendanceSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Volunteer</Label>
+              <Select
+                value={attendanceForm.sewadar_id}
+                onValueChange={(v) => setAttendanceForm((prev) => ({ ...prev, sewadar_id: v }))}
+                required
+                disabled={!canMarkAttendance}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select volunteer" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sewadars.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.full_name || s.email || '—'} {s.email ? `(${s.email})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="time_of_sewa">Time of Sewa</Label>
+              <Input
+                id="time_of_sewa"
+                type="time"
+                value={attendanceForm.time_of_sewa}
+                onChange={(e) => setAttendanceForm((prev) => ({ ...prev, time_of_sewa: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Sewa Area</Label>
+              <Select
+                value={attendanceForm.sewa_area}
+                onValueChange={(v) => setAttendanceForm((prev) => ({ ...prev, sewa_area: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEWA_AREA_OPTIONS.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeAttendanceDialog} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting || !canMarkAttendance}>
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Attendance Dialog */}
+      <Dialog open={attendanceEditOpen} onOpenChange={(open) => !open && closeAttendanceEdit()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Attendance</DialogTitle>
+            <DialogDescription>
+              {attendanceEditRecord ? (
+                <>Update record for {attendanceEditRecord.sewadar_name}.</>
+              ) : (
+                'Update this attendance record.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAttendanceEditSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-date">Date</Label>
+              <Input
+                id="edit-date"
+                type="date"
+                value={attendanceEditForm.date}
+                onChange={(e) => setAttendanceEditForm((prev) => ({ ...prev, date: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-time">Time of Sewa</Label>
+              <Input
+                id="edit-time"
+                type="time"
+                value={attendanceEditForm.time_of_sewa}
+                onChange={(e) => setAttendanceEditForm((prev) => ({ ...prev, time_of_sewa: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Sewa Area</Label>
+              <Select
+                value={attendanceEditForm.sewa_area}
+                onValueChange={(v) => setAttendanceEditForm((prev) => ({ ...prev, sewa_area: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEWA_AREA_OPTIONS.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeAttendanceEdit} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save changes'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Availability Dialog — Section A: upcoming Sunday; Section B: general weekdays */}
+      <Dialog open={rosterOpen} onOpenChange={setRosterOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Availability</DialogTitle>
+            <DialogDescription>Set upcoming Sunday sewa and general weekday availability.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleRosterSubmit} className="space-y-6">
+            <div className="space-y-2">
+              <Label>Volunteer</Label>
+              <Select
+                value={rosterForm.sewadar_id}
+                onValueChange={(v) => setRosterForm((prev) => ({ ...prev, sewadar_id: v }))}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select volunteer" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sewadars.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.full_name || s.email || '—'} {s.email ? `(${s.email})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-4">
+              <h4 className="text-sm font-medium">Upcoming Event</h4>
+              <p className="text-xs text-muted-foreground">Are you available for the upcoming Sunday sewa?</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Input
+                  id="specific_date"
+                  type="date"
+                  value={rosterForm.specific_date}
+                  onChange={(e) => setRosterForm((prev) => ({ ...prev, specific_date: e.target.value }))}
+                  className="w-[160px]"
+                />
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="is_available"
+                    checked={rosterForm.is_available_on_date}
+                    onCheckedChange={(v) => setRosterForm((prev) => ({ ...prev, is_available_on_date: v }))}
+                  />
+                  <Label htmlFor="is_available" className="cursor-pointer">
+                    {rosterForm.is_available_on_date ? 'Yes' : 'No'}
+                  </Label>
+                </div>
+              </div>
+              <Input
+                id="event_remarks"
+                value={rosterForm.event_remarks}
+                onChange={(e) => setRosterForm((prev) => ({ ...prev, event_remarks: e.target.value }))}
+                placeholder="Remarks (optional)"
+                className="max-w-sm"
+              />
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-4">
+              <h4 className="text-sm font-medium">General Weekdays</h4>
+              <p className="text-xs text-muted-foreground">When can you usually support?</p>
+              <div className="flex flex-wrap gap-2">
+                {WEEKDAY_OPTIONS.map((day) => (
+                  <Button
+                    key={day}
+                    type="button"
+                    variant={rosterForm.weekly_routine.includes(day) ? 'default' : 'outline'}
+                    size="sm"
+                    className="min-w-[3rem]"
+                    onClick={() => toggleRosterWeekday(day)}
+                  >
+                    {DAY_TO_SHORT[day]}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setRosterOpen(false)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

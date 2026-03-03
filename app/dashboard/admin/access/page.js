@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useDashboard } from '@/contexts/DashboardContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getUnifiedAccessDirectory, updateUserAccess, registerVolunteer } from '@/app/actions/admin'
+import { getUnifiedAccessDirectory, updateUserAccess, registerVolunteer, updateUserStatus } from '@/app/actions/admin'
 import { PERMISSION_GROUPS, ROLE_PERMISSIONS_MAP } from '@/lib/permissions'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -133,7 +133,7 @@ function UserCard({ user, currentUserSystemRole, onManageAccess }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-foreground truncate">
-                  {user.full_name || 'Unnamed'}
+                  {user.full_name || user.email || '—'}
                 </span>
                 {isAdmin && (
                   <Badge className={ROLE_BADGE_CLASSES.admin}>
@@ -295,7 +295,7 @@ function StaffMasterList({
             <CardContent className="p-8 text-center text-muted-foreground">
               <Users className="h-10 w-10 mx-auto mb-2 opacity-40" />
               <p className="text-sm">No users found</p>
-              <p className="text-xs mt-1">Clerk users and registered sewadars appear here</p>
+              <p className="text-xs mt-1">Clerk users and registered volunteers appear here</p>
             </CardContent>
           </Card>
         ) : (
@@ -306,7 +306,7 @@ function StaffMasterList({
                   Pending Action
                 </h2>
                 <p className="text-xs text-muted-foreground mb-3">
-                  Unlinked Clerk users — register as sewadar to grant access
+                  Unlinked Clerk users — set up access to grant permissions
                 </p>
                 <div className="space-y-2">
                   {pendingAction.map((u) => (
@@ -369,7 +369,7 @@ function StaffMasterList({
                   Volunteers
                 </h2>
                 <p className="text-xs text-muted-foreground mb-3">
-                  Registered sewadars with volunteer role
+                  Registered users with volunteer role
                 </p>
                 <div className="space-y-2">
                   {volunteers.map((u) => (
@@ -398,6 +398,7 @@ function AccessControlSheet({
   onClose,
   queryClient,
   currentUserSystemRole,
+  onStatusChange,
 }) {
   const sheetSide = useSheetSide()
   const [selectedPermissions, setSelectedPermissions] = useState([])
@@ -405,6 +406,7 @@ function AccessControlSheet({
   const [selectedShowInDirectory, setSelectedShowInDirectory] = useState(true)
   const [groupEnabled, setGroupEnabled] = useState(() => getInitialGroupEnabledFromPermissions([]))
   const [saving, setSaving] = useState(false)
+  const [statusSaving, setStatusSaving] = useState(false)
 
   useEffect(() => {
     if (selectedUser) {
@@ -514,8 +516,30 @@ function AccessControlSheet({
     setSaving(false)
   }, [selectedUser, selectedPermissions, selectedSystemRole, selectedShowInDirectory, queryClient, onClose])
 
-  const displayName = selectedUser?.full_name || 'User'
+  const handleStatusChange = useCallback(async (newStatus) => {
+    if (!selectedUser?.isSewadar || !selectedUser?.id || typeof selectedUser.id !== 'string' || selectedUser.id.startsWith('clerk_')) return
+    setStatusSaving(true)
+    try {
+      const res = await updateUserStatus(selectedUser.id, newStatus)
+      if (res.error) {
+        toast.error(res.error)
+        setStatusSaving(false)
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['access-staff'] })
+      onStatusChange?.(newStatus)
+      toast.success(newStatus === 'inactive' ? 'Volunteer deactivated' : 'Volunteer activated')
+    } catch {
+      toast.error('Failed to update status')
+    }
+    setStatusSaving(false)
+  }, [selectedUser, queryClient, onStatusChange])
+
+  const displayName = selectedUser?.full_name || selectedUser?.email || 'User'
   const isSewadar = selectedUser?.isSewadar === true
+  const volunteerStatus = (selectedUser?.status || 'approved').toLowerCase()
+  const canDeactivate = isSewadar && volunteerStatus === 'approved'
+  const canActivate = isSewadar && volunteerStatus === 'inactive'
 
   const sheetContentClass =
     sheetSide === 'bottom'
@@ -548,7 +572,12 @@ function AccessControlSheet({
                       {displayName}
                     </SheetTitle>
                     {isSewadar && (
-                      <Badge variant="default" className="text-[10px]">Registered Sewadar</Badge>
+                      <>
+                        <Badge variant="default" className="text-[10px]">In directory</Badge>
+                        {selectedUser.status === 'inactive' && (
+                          <Badge variant="secondary" className="text-[10px]">Inactive</Badge>
+                        )}
+                      </>
                     )}
                   </div>
                   {selectedUser.email && (
@@ -600,8 +629,8 @@ function AccessControlSheet({
               </div>
               <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/30">
                 <div>
-                  <p className="text-sm font-medium">Show in Volunteer Directory</p>
-                  <p className="text-xs text-muted-foreground">List this person in the Volunteers tab</p>
+                  <p className="text-sm font-medium">Also register as volunteer</p>
+                  <p className="text-xs text-muted-foreground">Shows in Volunteers tab</p>
                 </div>
                 <Switch
                   checked={selectedShowInDirectory}
@@ -617,7 +646,7 @@ function AccessControlSheet({
               </p>
               <Accordion
                 type="multiple"
-                defaultValue={[]}
+                defaultValue={Object.keys(PERMISSION_GROUPS)}
                 className={`w-full ${hierarchyLock ? 'pointer-events-none opacity-60' : ''}`}
               >
                 {Object.entries(PERMISSION_GROUPS).map(([category, items]) => {
@@ -674,6 +703,44 @@ function AccessControlSheet({
                   )
                 })}
               </Accordion>
+
+              {isSewadar && selectedUser?.id && !String(selectedUser.id).startsWith('clerk_') && (
+                <div className="rounded-lg border p-3 bg-muted/30 space-y-2">
+                  <p className="text-sm font-medium">Volunteer status</p>
+                  <p className="text-xs text-muted-foreground">
+                    {volunteerStatus === 'inactive'
+                      ? 'This volunteer is inactive and will not appear in the Volunteer Directory or Roster.'
+                      : 'Deactivating will hide them from the directory and roster while keeping their history.'}
+                  </p>
+                  <div className="flex gap-2 pt-1">
+                    {canDeactivate && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive border-destructive/50 hover:bg-destructive/10"
+                        disabled={statusSaving}
+                        onClick={() => handleStatusChange('inactive')}
+                      >
+                        {statusSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+                        Deactivate volunteer
+                      </Button>
+                    )}
+                    {canActivate && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={statusSaving}
+                        onClick={() => handleStatusChange('approved')}
+                      >
+                        {statusSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+                        Activate volunteer
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-background flex gap-2">
@@ -758,7 +825,7 @@ export default function AccessManagementPage() {
           <h1 className="text-xl font-bold">Access Management</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Unified directory: registered sewadars and Clerk users. Register users to assign permissions.
+          Unified directory: registered users and Clerk sign-ins. Set up access to assign roles and permissions.
         </p>
       </div>
 
@@ -775,6 +842,7 @@ export default function AccessManagementPage() {
         onClose={handleCloseSheet}
         queryClient={queryClient}
         currentUserSystemRole={currentUserSystemRole}
+        onStatusChange={(newStatus) => setSelectedUser((prev) => (prev ? { ...prev, status: newStatus } : null))}
       />
     </div>
   )

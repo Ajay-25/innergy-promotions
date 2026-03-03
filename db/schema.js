@@ -8,17 +8,20 @@ import {
   time,
   boolean,
   pgEnum,
+  unique,
 } from 'drizzle-orm/pg-core'
 
 // ============================================================
 // ENUMS (Drizzle does not create PostgreSQL ENUMs by default; we use text + check in app or createEnum in migration)
 // ============================================================
 
-export const sewaTypeEnum = pgEnum('sewa_type_enum', ['Trainer', 'Promoter', 'Both'])
+export const sewaTypeEnum = pgEnum('sewa_type_enum', ['Trainer', 'Promotion', 'Both'])
 export const appStatusEnum = pgEnum('app_status_enum', ['Already Installed', 'New Installation'])
 export const moduleTypeEnum = pgEnum('module_type_enum', ['Module 1', 'Module 2', 'Both'])
-export const attendanceStatusEnum = pgEnum('attendance_status_enum', ['Present', 'Absent'])
+export const attendanceStatusEnum = pgEnum('attendance_status_enum', ['Present', 'Absent', 'Potential', 'Confirmed'])
 export const availabilityStatusEnum = pgEnum('availability_status_enum', ['Available', 'Unavailable', 'Tentative'])
+export const callStatusEnum = pgEnum('call_status_enum', ['pending', 'called', 'no_answer', 'interested', 'not_interested'])
+export const outreachModuleEnum = pgEnum('outreach_module_enum', ['module_1', 'module_2', 'both'])
 
 // ============================================================
 // 1. SEWADAR MANAGEMENT (email as primary identifier for sewadars)
@@ -30,6 +33,7 @@ export const sewadarCore = pgTable('sewadar_core', {
   email: text('email').notNull().unique(),
   clerkId: text('clerk_id').unique(),
   systemRole: text('system_role').notNull().default('pending'),
+  status: text('status').notNull().default('approved'),
   permissions: text('permissions').array().notNull().default(sql`'{}'::text[]`),
   isFieldVolunteer: boolean('is_field_volunteer').notNull().default(true),
   phone: text('phone').default(''),
@@ -38,18 +42,15 @@ export const sewadarCore = pgTable('sewadar_core', {
   address: text('address').default(''),
   zone: text('zone').default(''),
   center: text('center').default(''),
+  qualification: text('qualification').default(''),
+  qualificationOther: text('qualification_other').default(''),
+  profession: text('profession').default(''),
+  professionOther: text('profession_other').default(''),
   profileCompleted: boolean('profile_completed').notNull().default(false),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
-
-export const sewadarData = pgTable('sewadar_data', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  sewadarId: uuid('sewadar_id').notNull().unique().references(() => sewadarCore.id, { onDelete: 'cascade' }),
-  fullName: text('full_name').notNull().default(''),
-  phone: text('phone').default(''),
-  sewaType: sewaTypeEnum('sewa_type').notNull().default('Promoter'),
-  address: text('address').default(''),
+  sewaType: sewaTypeEnum('sewa_type').notNull().default('Promotion'),
+  weeklyRoutine: text('weekly_routine').array().notNull().default(sql`'{}'::text[]`),
+  nextSundayDate: date('next_sunday_date'),
+  isAvailableOnDate: boolean('is_available_on_date'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -57,9 +58,10 @@ export const sewadarData = pgTable('sewadar_data', {
 export const sewadarAttendance = pgTable('sewadar_attendance', {
   id: uuid('id').primaryKey().defaultRandom(),
   sewadarId: uuid('sewadar_id').notNull().references(() => sewadarCore.id, { onDelete: 'cascade' }),
+  markedBy: uuid('marked_by').references(() => sewadarCore.id, { onDelete: 'set null' }),
   date: date('date').notNull(),
   timeOfSewa: time('time_of_sewa').notNull(),
-  sewaArea: sewaTypeEnum('sewa_area').notNull().default('Promoter'),
+  sewaArea: sewaTypeEnum('sewa_area').notNull().default('Promotion'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -67,6 +69,7 @@ export const sewadarRoster = pgTable('sewadar_roster', {
   id: uuid('id').primaryKey().defaultRandom(),
   sewadarId: uuid('sewadar_id').notNull().references(() => sewadarCore.id, { onDelete: 'cascade' }),
   plannedDate: date('planned_date').notNull(),
+  isAvailableOnDate: boolean('is_available_on_date').notNull().default(true),
   eventRemarks: text('event_remarks').default(''),
   availabilityStatus: availabilityStatusEnum('availability_status').notNull().default('Available'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -89,22 +92,23 @@ export const promotionLogs = pgTable('promotion_logs', {
 })
 
 // ============================================================
-// 3. GOLDEN MEMBERS (CRM)
+// 3. GOLDEN MEMBERS (CRM) — citizens 50+, single lifecycle
 // ============================================================
 
 export const goldenMembers = pgTable('golden_members', {
   id: uuid('id').primaryKey().defaultRandom(),
-  registeredBy: uuid('registered_by').references(() => sewadarCore.id, { onDelete: 'set null' }),
-  fullName: text('full_name').notNull().default(''),
-  contactNo: text('contact_no').default(''),
-  innergyEmail: text('innergy_email').default(''),
-  cityCenter: text('city_center').default(''),
-  zone: text('zone').default(''),
+  name: text('name').notNull(),
+  phone: text('phone').notNull().unique(),
+  innergyEmail: text('innergy_email').unique(),
+  gender: text('gender').default(''),
+  preferredLanguage: text('preferred_language').default(''),
   dob: date('dob'),
-  preferredLanguage: text('preferred_language').notNull().default('Hindi'),
+  address: text('address').default(''),
+  zone: text('zone').default(''),
+  center: text('center').default(''),
   remarks: text('remarks').default(''),
+  registeredBy: uuid('registered_by').references(() => sewadarCore.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 // ============================================================
@@ -139,3 +143,21 @@ export const eventPhotos = pgTable('event_photos', {
   photoUrl: text('photo_url').notNull().default(''),
   uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// ============================================================
+// 5. EVENT OUTREACH (calling / availability for training events)
+// ============================================================
+
+export const eventOutreach = pgTable('event_outreach', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventId: uuid('event_id').notNull().references(() => trainingEvents.id, { onDelete: 'cascade' }),
+  memberId: uuid('member_id').notNull().references(() => goldenMembers.id, { onDelete: 'cascade' }),
+  callStatus: callStatusEnum('call_status').notNull().default('pending'),
+  trainingModule: outreachModuleEnum('training_module'),
+  notes: text('notes').default(''),
+  updatedBy: uuid('updated_by').references(() => sewadarCore.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  eventMemberUnique: unique('event_outreach_event_member_unique').on(t.eventId, t.memberId),
+}))

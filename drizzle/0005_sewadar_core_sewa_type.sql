@@ -1,0 +1,1 @@
+ALTER TABLE "sewadar_core" ADD COLUMN "sewa_type" "sewa_type_enum" DEFAULT 'Promoter' NOT NULL;

@@ -4,11 +4,10 @@ import { currentUser, clerkClient } from '@clerk/nextjs/server'
 import { db } from '@/db'
 import {
   sewadarCore,
-  sewadarData,
   sewadarAttendance,
   sewadarRoster,
 } from '@/db/schema'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and } from 'drizzle-orm'
 import { hasPermission, ALL_PERMISSIONS, ROLE_PERMISSIONS_MAP } from '@/lib/permissions'
 
 function isAdmin(user) {
@@ -17,7 +16,7 @@ function isAdmin(user) {
 }
 
 /**
- * Fetch all sewadars (core + data) for Directory and dropdowns. Returns permissions array per sewadar.
+ * Fetch all sewadars from sewadar_core only (join-free). Returns permissions and sewa_type.
  */
 export async function getSewadars() {
   const user = await currentUser()
@@ -26,6 +25,7 @@ export async function getSewadars() {
   const rows = await db
     .select({
       id: sewadarCore.id,
+      name: sewadarCore.name,
       email: sewadarCore.email,
       clerkId: sewadarCore.clerkId,
       systemRole: sewadarCore.systemRole,
@@ -35,13 +35,15 @@ export async function getSewadars() {
       dob: sewadarCore.dob,
       zone: sewadarCore.zone,
       center: sewadarCore.center,
+      qualification: sewadarCore.qualification,
+      qualificationOther: sewadarCore.qualificationOther,
+      profession: sewadarCore.profession,
+      professionOther: sewadarCore.professionOther,
       createdAt: sewadarCore.createdAt,
-      fullName: sewadarData.fullName,
-      dataPhone: sewadarData.phone,
-      sewaType: sewadarData.sewaType,
+      sewaType: sewadarCore.sewaType,
     })
     .from(sewadarCore)
-    .leftJoin(sewadarData, eq(sewadarCore.id, sewadarData.sewadarId))
+    .where(eq(sewadarCore.status, 'approved'))
     .orderBy(sewadarCore.email)
 
   return {
@@ -51,16 +53,127 @@ export async function getSewadars() {
       clerk_id: r.clerkId || null,
       system_role: r.systemRole || 'volunteer',
       permissions: Array.isArray(r.permissions) ? r.permissions : [],
-      full_name: r.fullName || '',
-      phone: r.phone || r.dataPhone || '',
+      full_name: (r.name && r.name.trim()) || r.email || '—',
+      phone: r.phone || '',
       gender: r.gender || '',
       dob: r.dob || null,
       zone: r.zone || '',
       center: r.center || '',
+      qualification: r.qualification || '',
+      qualification_other: r.qualificationOther || '',
+      profession: r.profession || '',
+      profession_other: r.professionOther || '',
       created_at: r.createdAt || null,
-      sewa_type: r.sewaType || 'Promoter',
+      sewa_type: r.sewaType || 'Promotion',
     })),
   }
+}
+
+/**
+ * Get a single volunteer/sewadar by id. Requires sewadars:view or sewadars:edit or system:manage_access.
+ */
+export async function getSewadarById(id) {
+  const user = await currentUser()
+  if (!user) return { error: 'Unauthorized', data: null }
+
+  const perms = Array.isArray(user.publicMetadata?.permissions) ? user.publicMetadata.permissions : []
+  if (!hasPermission(perms, 'sewadars:view') && !hasPermission(perms, 'sewadars:edit') && !hasPermission(perms, 'system:manage_access')) {
+    return { error: 'Forbidden', data: null }
+  }
+
+  const [row] = await db
+    .select({
+      id: sewadarCore.id,
+      name: sewadarCore.name,
+      email: sewadarCore.email,
+      phone: sewadarCore.phone,
+      gender: sewadarCore.gender,
+      dob: sewadarCore.dob,
+      address: sewadarCore.address,
+      zone: sewadarCore.zone,
+      center: sewadarCore.center,
+      qualification: sewadarCore.qualification,
+      qualificationOther: sewadarCore.qualificationOther,
+      profession: sewadarCore.profession,
+      professionOther: sewadarCore.professionOther,
+      sewaType: sewadarCore.sewaType,
+      createdAt: sewadarCore.createdAt,
+    })
+    .from(sewadarCore)
+    .where(eq(sewadarCore.id, id))
+    .limit(1)
+
+  if (!row) return { error: 'Not found', data: null }
+
+  return {
+    data: {
+      id: row.id,
+      full_name: (row.name && row.name.trim()) || row.email || '—',
+      email: row.email || '',
+      phone: row.phone || '',
+      gender: row.gender || '',
+      dob: row.dob ?? '',
+      address: row.address || '',
+      zone: row.zone || '',
+      center: row.center || '',
+      qualification: row.qualification || '',
+      qualification_other: row.qualificationOther || '',
+      profession: row.profession || '',
+      profession_other: row.professionOther || '',
+      sewa_type: row.sewaType || 'Promotion',
+      created_at: row.createdAt,
+    },
+  }
+}
+
+/**
+ * Update volunteer profile (name, phone, gender, dob, address, zone, center, qualification, profession, sewa_type).
+ * Requires sewadars:edit or system:manage_access.
+ */
+export async function updateVolunteerProfile(id, data) {
+  const user = await currentUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const perms = Array.isArray(user.publicMetadata?.permissions) ? user.publicMetadata.permissions : []
+  if (!hasPermission(perms, 'sewadars:edit') && !hasPermission(perms, 'system:manage_access')) {
+    return { error: 'Forbidden' }
+  }
+
+  const [row] = await db.select({ id: sewadarCore.id }).from(sewadarCore).where(eq(sewadarCore.id, id)).limit(1)
+  if (!row) return { error: 'Not found' }
+
+  const name = typeof data.full_name === 'string' ? data.full_name.trim() : undefined
+  const phone = typeof data.phone === 'string' ? data.phone.trim() || null : undefined
+  const gender = data.gender && ['Male', 'Female', 'Other'].includes(data.gender) ? data.gender : undefined
+  const dob = data.dob || undefined
+  const address = typeof data.address === 'string' ? data.address.trim() || null : undefined
+  const zone = typeof data.zone === 'string' ? data.zone.trim() || null : undefined
+  const center = typeof data.center === 'string' ? data.center.trim() || null : undefined
+  const qualification = typeof data.qualification === 'string' ? data.qualification.trim() || null : undefined
+  const qualificationOther = typeof data.qualification_other === 'string' ? data.qualification_other.trim() || null : undefined
+  const profession = typeof data.profession === 'string' ? data.profession.trim() || null : undefined
+  const professionOther = typeof data.profession_other === 'string' ? data.profession_other.trim() || null : undefined
+  const sewaType = ['Trainer', 'Promotion', 'Both'].includes(data.sewa_type) ? data.sewa_type : undefined
+
+  const updatePayload = {}
+  if (name !== undefined) updatePayload.name = name
+  if (phone !== undefined) updatePayload.phone = phone
+  if (gender !== undefined) updatePayload.gender = gender
+  if (dob !== undefined) updatePayload.dob = dob
+  if (address !== undefined) updatePayload.address = address
+  if (zone !== undefined) updatePayload.zone = zone
+  if (center !== undefined) updatePayload.center = center
+  if (qualification !== undefined) updatePayload.qualification = qualification
+  if (qualificationOther !== undefined) updatePayload.qualificationOther = qualificationOther
+  if (profession !== undefined) updatePayload.profession = profession
+  if (professionOther !== undefined) updatePayload.professionOther = professionOther
+  if (sewaType !== undefined) updatePayload.sewaType = sewaType
+  if (Object.keys(updatePayload).length === 0) return { ok: true }
+
+  updatePayload.updatedAt = new Date()
+
+  await db.update(sewadarCore).set(updatePayload).where(eq(sewadarCore.id, id))
+  return { ok: true }
 }
 
 /**
@@ -81,16 +194,15 @@ export async function getUnifiedAccessDirectory() {
         email: sewadarCore.email,
         clerkId: sewadarCore.clerkId,
         systemRole: sewadarCore.systemRole,
+        status: sewadarCore.status,
         permissions: sewadarCore.permissions,
         isFieldVolunteer: sewadarCore.isFieldVolunteer,
         phone: sewadarCore.phone,
         zone: sewadarCore.zone,
         center: sewadarCore.center,
         name: sewadarCore.name,
-        fullName: sewadarData.fullName,
       })
       .from(sewadarCore)
-      .leftJoin(sewadarData, eq(sewadarCore.id, sewadarData.sewadarId))
       .orderBy(sewadarCore.email),
     (async () => {
       try {
@@ -111,9 +223,10 @@ export async function getUnifiedAccessDirectory() {
     const entry = {
       id: r.id,
       email: r.email || '',
-      full_name: (r.name && r.name.trim()) || r.fullName || '',
+      full_name: (r.name && r.name.trim()) || r.email || '—',
       clerk_id: r.clerkId || null,
       system_role: r.systemRole || 'volunteer',
+      status: (r.status || 'approved'),
       is_field_volunteer: r.isFieldVolunteer ?? true,
       permissions: Array.isArray(r.permissions) ? r.permissions : [],
       phone: r.phone || '',
@@ -169,7 +282,7 @@ export async function getFieldVolunteers() {
       dob: sewadarCore.dob,
     })
     .from(sewadarCore)
-    .where(eq(sewadarCore.isFieldVolunteer, true))
+    .where(and(eq(sewadarCore.isFieldVolunteer, true), eq(sewadarCore.status, 'approved')))
     .orderBy(sewadarCore.name)
 
   return {
@@ -263,6 +376,38 @@ export async function updateUserAccess(email, role, permissions, isFieldVoluntee
   return { ok: true }
 }
 
+const SEWADAR_STATUSES = ['pending', 'approved', 'inactive', 'suspended']
+
+/**
+ * Update a sewadar's status (e.g. deactivate without deleting). Caller must have system:manage_access.
+ * @param {string} sewadarId - sewadar_core.id (UUID)
+ * @param {string} newStatus - one of: pending, approved, inactive, suspended
+ */
+export async function updateUserStatus(sewadarId, newStatus) {
+  const user = await currentUser()
+  if (!user) return { error: 'Unauthorized' }
+  const perms = Array.isArray(user.publicMetadata?.permissions) ? user.publicMetadata.permissions : []
+  if (!hasPermission(perms, 'system:manage_access')) return { error: 'Forbidden' }
+
+  const status = typeof newStatus === 'string' ? newStatus.toLowerCase().trim() : ''
+  if (!SEWADAR_STATUSES.includes(status)) return { error: 'Invalid status' }
+
+  const [row] = await db
+    .select({ id: sewadarCore.id })
+    .from(sewadarCore)
+    .where(eq(sewadarCore.id, sewadarId))
+    .limit(1)
+
+  if (!row) return { error: 'Sewadar not found' }
+
+  await db
+    .update(sewadarCore)
+    .set({ status, updatedAt: new Date() })
+    .where(eq(sewadarCore.id, sewadarId))
+
+  return { ok: true }
+}
+
 /** @deprecated Use updateUserAccess(email, role, permissions) instead. */
 export async function updateSewadarPermissions(email, newPermissions) {
   const [row] = await db
@@ -286,8 +431,7 @@ export async function updateSewadarSystemRole(email, newSystemRole) {
 }
 
 /**
- * Register a new volunteer/sewadar (core + data). Accepts demographic and organizational fields.
- * Phone stored in sewadar_core (+91 format); also synced to sewadar_data for backward compatibility.
+ * Register a new volunteer/sewadar (sewadar_core only). All profile fields stored on core.
  */
 export async function registerVolunteer(data) {
   const user = await currentUser()
@@ -312,11 +456,19 @@ export async function registerVolunteer(data) {
   const phone = typeof data.phone === 'string' ? data.phone.trim() : ''
   const name = typeof data.full_name === 'string' ? data.full_name.trim() : ''
   const clerkId = typeof data.clerk_id === 'string' && data.clerk_id.trim() ? data.clerk_id.trim() : null
+  const sewaType = ['Trainer', 'Promotion', 'Both'].includes(data.sewa_type) ? data.sewa_type : 'Promotion'
+
+  const qualification = typeof data.qualification === 'string' ? data.qualification.trim() || null : null
+  const qualificationOther = typeof data.qualification_other === 'string' ? data.qualification_other.trim() || null : null
+  const profession = typeof data.profession === 'string' ? data.profession.trim() || null : null
+  const professionOther = typeof data.profession_other === 'string' ? data.profession_other.trim() || null : null
+
   const [inserted] = await db.insert(sewadarCore).values({
     email: data.email,
     name: name || data.email || 'Unnamed',
     clerkId: clerkId || undefined,
     systemRole,
+    status: 'approved',
     permissions,
     isFieldVolunteer,
     phone: phone || null,
@@ -324,16 +476,14 @@ export async function registerVolunteer(data) {
     dob: data.dob || null,
     zone: (data.zone && typeof data.zone === 'string') ? data.zone.trim() || null : null,
     center: (data.center && typeof data.center === 'string') ? data.center.trim() || null : null,
+    qualification: qualification ?? undefined,
+    qualificationOther: qualificationOther ?? undefined,
+    profession: profession ?? undefined,
+    professionOther: professionOther ?? undefined,
+    sewaType,
   }).returning({ id: sewadarCore.id })
 
   if (!inserted) return { error: 'Insert failed' }
-
-  await db.insert(sewadarData).values({
-    sewadarId: inserted.id,
-    fullName: data.full_name || '',
-    phone: phone || '',
-    sewaType: data.sewa_type || 'Promoter',
-  })
 
   if (clerkId) {
     try {
@@ -361,25 +511,34 @@ export async function registerSewadar(data) {
 }
 
 /**
- * Get attendance records (optionally filtered by date).
+ * Get attendance records (optionally filtered by date). Returns marked_by and current_user_sewadar_id for edit gating.
  */
 export async function getAttendance(dateFilter) {
   const user = await currentUser()
   if (!user) return { error: 'Unauthorized', data: [] }
 
+  const email = user.emailAddresses?.[0]?.emailAddress ?? ''
+  const [myRow] = email
+    ? await db
+        .select({ id: sewadarCore.id })
+        .from(sewadarCore)
+        .where(eq(sewadarCore.email, email))
+        .limit(1)
+    : []
+
   const rows = await db
     .select({
       id: sewadarAttendance.id,
       sewadarId: sewadarAttendance.sewadarId,
+      markedBy: sewadarAttendance.markedBy,
       date: sewadarAttendance.date,
       timeOfSewa: sewadarAttendance.timeOfSewa,
       sewaArea: sewadarAttendance.sewaArea,
-      fullName: sewadarData.fullName,
+      name: sewadarCore.name,
       email: sewadarCore.email,
     })
     .from(sewadarAttendance)
     .innerJoin(sewadarCore, eq(sewadarAttendance.sewadarId, sewadarCore.id))
-    .leftJoin(sewadarData, eq(sewadarCore.id, sewadarData.sewadarId))
     .orderBy(desc(sewadarAttendance.createdAt))
 
   const filtered = dateFilter ? rows.filter((r) => String(r.date) === dateFilter) : rows
@@ -388,18 +547,22 @@ export async function getAttendance(dateFilter) {
     data: filtered.map((r) => ({
       id: r.id,
       sewadar_id: r.sewadarId,
-      sewadar_name: r.fullName || '—',
+      sewadar_name: (r.name && r.name.trim()) || r.email || '—',
       email: r.email || '—',
+      marked_by: r.markedBy ?? null,
       date: r.date,
       time_of_sewa: r.timeOfSewa,
       sewa_area: r.sewaArea,
       sewa_performed: `${r.sewaArea || ''} - Logged`,
     })),
+    current_user_sewadar_id: myRow?.id ?? null,
   }
 }
 
 /**
- * Get roster (upcoming availability) records.
+ * Get roster: per-volunteer from sewadar_core only (weekly_routine, next_sunday_date, is_available_on_date).
+ * Returns { data: [ { sewadar_id, sewadar_name, weekly_routine, specific_entries } ], nextSunday }.
+ * No sewadar_data join for roster; all availability lives on core.
  */
 export async function getRoster() {
   const user = await currentUser()
@@ -407,39 +570,73 @@ export async function getRoster() {
 
   const rows = await db
     .select({
-      id: sewadarRoster.id,
-      sewadarId: sewadarRoster.sewadarId,
-      plannedDate: sewadarRoster.plannedDate,
-      eventRemarks: sewadarRoster.eventRemarks,
-      availabilityStatus: sewadarRoster.availabilityStatus,
-      fullName: sewadarData.fullName,
+      id: sewadarCore.id,
+      name: sewadarCore.name,
+      weeklyRoutine: sewadarCore.weeklyRoutine,
+      nextSundayDate: sewadarCore.nextSundayDate,
+      isAvailableOnDate: sewadarCore.isAvailableOnDate,
     })
-    .from(sewadarRoster)
-    .innerJoin(sewadarCore, eq(sewadarRoster.sewadarId, sewadarCore.id))
-    .leftJoin(sewadarData, eq(sewadarCore.id, sewadarData.sewadarId))
-    .orderBy(sewadarRoster.plannedDate)
+    .from(sewadarCore)
+    .where(and(eq(sewadarCore.isFieldVolunteer, true), eq(sewadarCore.status, 'approved')))
+    .orderBy(sewadarCore.name)
+
+  const nextSunday = getNextSundayDateString()
+
+  const data = rows.map((r) => {
+    const weekly_routine = Array.isArray(r.weeklyRoutine) ? r.weeklyRoutine : []
+    const specific_entries = []
+    if (r.nextSundayDate != null) {
+      const rawAvailable = r.isAvailableOnDate
+      specific_entries.push({
+        id: null,
+        planned_date: r.nextSundayDate,
+        is_available_on_date: rawAvailable,
+        event_remarks: '',
+        availability_status:
+          rawAvailable === true ? 'Available' : rawAvailable === false ? 'Unavailable' : 'Pending',
+      })
+    }
+    return {
+      sewadar_id: r.id,
+      sewadar_name: (r.name && r.name.trim()) || '—',
+      weekly_routine,
+      specific_entries,
+    }
+  })
 
   return {
-    data: rows.map((r) => ({
-      id: r.id,
-      sewadar_id: r.sewadarId,
-      sewadar_name: r.fullName || '—',
-      planned_date: r.plannedDate,
-      event_remarks: r.eventRemarks || '',
-      availability_status: r.availabilityStatus,
-    })),
+    data,
+    nextSunday,
   }
 }
 
+function getNextSundayDateString() {
+  const d = new Date()
+  const day = d.getDay()
+  const daysUntilSunday = day === 0 ? 7 : 7 - day
+  d.setDate(d.getDate() + daysUntilSunday)
+  return d.toISOString().slice(0, 10)
+}
+
 /**
- * Log daily attendance for a sewadar.
+ * Log daily attendance for a volunteer. Sets marked_by to current user's sewadar id when available.
  */
 export async function logAttendance(data) {
   const user = await currentUser()
   if (!user) return { error: 'Unauthorized' }
 
+  const email = user.emailAddresses?.[0]?.emailAddress ?? ''
+  const [myRow] = email
+    ? await db
+        .select({ id: sewadarCore.id })
+        .from(sewadarCore)
+        .where(eq(sewadarCore.email, email))
+        .limit(1)
+    : []
+
   await db.insert(sewadarAttendance).values({
     sewadarId: data.sewadar_id,
+    markedBy: myRow?.id ?? null,
     date: data.date,
     timeOfSewa: data.time_of_sewa,
     sewaArea: data.sewa_area,
@@ -449,18 +646,108 @@ export async function logAttendance(data) {
 }
 
 /**
- * Log upcoming availability (roster).
+ * Update an existing attendance record. Allowed only if user has sewadars:edit_attendance OR is the record's marked_by author.
+ */
+export async function updateAttendance(attendanceId, data) {
+  const user = await currentUser()
+  if (!user) return { error: 'Unauthorized' }
+
+  const perms = Array.isArray(user.publicMetadata?.permissions) ? user.publicMetadata.permissions : []
+  const email = user.emailAddresses?.[0]?.emailAddress ?? ''
+  const [myRow] = email
+    ? await db
+        .select({ id: sewadarCore.id })
+        .from(sewadarCore)
+        .where(eq(sewadarCore.email, email))
+        .limit(1)
+    : []
+  const mySewadarId = myRow?.id ?? null
+
+  const [record] = await db
+    .select({ id: sewadarAttendance.id, markedBy: sewadarAttendance.markedBy })
+    .from(sewadarAttendance)
+    .where(eq(sewadarAttendance.id, attendanceId))
+    .limit(1)
+
+  if (!record) return { error: 'Attendance record not found' }
+
+  const isAuthor = mySewadarId && record.markedBy && String(record.markedBy) === String(mySewadarId)
+  const canEdit = hasPermission(perms, 'sewadars:edit_attendance')
+  if (!canEdit && !isAuthor) return { error: 'You do not have permission to edit this attendance record' }
+
+  const updates = {}
+  if (data.date != null) updates.date = data.date
+  if (data.time_of_sewa != null) updates.timeOfSewa = data.time_of_sewa
+  if (data.sewa_area != null) updates.sewaArea = data.sewa_area
+  if (Object.keys(updates).length === 0) return { ok: true }
+
+  await db
+    .update(sewadarAttendance)
+    .set(updates)
+    .where(eq(sewadarAttendance.id, attendanceId))
+
+  return { ok: true }
+}
+
+/**
+ * Save roster: update sewadar_core only (weekly_routine, next_sunday_date, is_available_on_date).
+ * Optionally append to sewadar_roster for historical tracking.
+ * No sewadar_data used; all availability lives on core.
  */
 export async function logRoster(data) {
   const user = await currentUser()
   if (!user) return { error: 'Unauthorized' }
 
-  await db.insert(sewadarRoster).values({
-    sewadarId: data.sewadar_id,
-    plannedDate: data.planned_date,
-    eventRemarks: data.event_remarks || '',
-    availabilityStatus: data.availability_status || 'Available',
-  })
+  const hasSpecific = data.specific_date != null && data.specific_date !== ''
+  const hasRoutine = Array.isArray(data.weekly_routine)
+
+  if (!hasSpecific && !hasRoutine) return { error: 'Provide at least specific_date or weekly_routine' }
+
+  const updates = { updatedAt: new Date() }
+  if (hasSpecific) {
+    updates.nextSundayDate = data.specific_date
+    updates.isAvailableOnDate = data.is_available_on_date !== false
+  }
+  if (hasRoutine) {
+    updates.weeklyRoutine = data.weekly_routine
+  }
+
+  await db
+    .update(sewadarCore)
+    .set(updates)
+    .where(eq(sewadarCore.id, data.sewadar_id))
+
+  if (hasSpecific) {
+    const isAvailable = data.is_available_on_date !== false
+    const existing = await db
+      .select({ id: sewadarRoster.id })
+      .from(sewadarRoster)
+      .where(
+        and(
+          eq(sewadarRoster.sewadarId, data.sewadar_id),
+          eq(sewadarRoster.plannedDate, data.specific_date)
+        )
+      )
+      .limit(1)
+    if (existing.length > 0) {
+      await db
+        .update(sewadarRoster)
+        .set({
+          isAvailableOnDate: isAvailable,
+          eventRemarks: data.event_remarks ?? '',
+          availabilityStatus: isAvailable ? (data.availability_status || 'Available') : 'Unavailable',
+        })
+        .where(eq(sewadarRoster.id, existing[0].id))
+    } else {
+      await db.insert(sewadarRoster).values({
+        sewadarId: data.sewadar_id,
+        plannedDate: data.specific_date,
+        isAvailableOnDate: isAvailable,
+        eventRemarks: data.event_remarks || '',
+        availabilityStatus: isAvailable ? (data.availability_status || 'Available') : 'Unavailable',
+      })
+    }
+  }
 
   return { ok: true }
 }

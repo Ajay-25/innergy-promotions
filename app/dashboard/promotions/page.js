@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { useDashboard } from '@/contexts/DashboardContext'
-import { getPromotions, logStandardPromotion, registerGoldenMember } from '@/app/actions/interactions'
+import { getPromotions, logStandardPromotion } from '@/app/actions/interactions'
+import { upsertGoldenMember } from '@/app/actions/golden-members'
 import { getSewadars } from '@/app/actions/admin'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -14,24 +16,17 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
+import { GoldenMemberForm } from '@/components/forms/GoldenMemberForm'
+import { InteractionDetailSheet } from '@/components/promotions/InteractionDetailSheet'
 import { Plus, Smartphone, Download, Star, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
-const ZONE_OPTIONS = [
-  'Zone-1(Delhi)',
-  'Zone-2(Punjab)',
-  'Zone-3(Haryana)',
-  'Zone-4(Madhya Pradesh)',
-  'Zone-5(Uttar Pradesh)',
-  'Zone-6(Uttar Pradesh)',
-  'Zone-7(Rajasthan)',
-  'Zone-8(Maharashtra)',
-  'Zone-9(South-Orissa/Hyderabad/Bengaluru/etc.)',
-  'Zone-10(Bihar)',
-  'Zone-11(Uttar Pradesh)',
-  'Zone-12(Gujarat)',
-]
-const LANGUAGE_OPTIONS = ['Hindi', 'English']
+function formatTableDateTime(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
+}
 
 const INITIAL_FORM = {
   app_status: '',
@@ -39,14 +34,6 @@ const INITIAL_FORM = {
   contact_number: '',
   email_used: '',
   tech_issue_notes: '',
-  gm_full_name: '',
-  gm_phone: '',
-  gm_email: '',
-  gm_city_center: '',
-  gm_zone: '',
-  gm_dob: '',
-  gm_language: '',
-  gm_remarks: '',
 }
 
 export default function PromotionsPage() {
@@ -62,6 +49,7 @@ export default function PromotionsPage() {
   const [isGoldenMember, setIsGoldenMember] = useState(true)
   const [formData, setFormData] = useState(INITIAL_FORM)
   const [attributionSewadarId, setAttributionSewadarId] = useState('__me__')
+  const [detailInteraction, setDetailInteraction] = useState(null)
 
   const fetchSewadars = useCallback(async () => {
     const res = await getSewadars()
@@ -98,61 +86,44 @@ export default function PromotionsPage() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     const clerkUserEmail = user?.email
-    const clerkUserName = user?.user_metadata?.full_name || ''
     if (!clerkUserEmail) {
       toast.error('You must be signed in to log an interaction.')
       return
     }
-
+    if (!formData.app_status) return
     setSubmitting(true)
     const sewadarId = attributionSewadarId && attributionSewadarId !== '__me__' ? attributionSewadarId : undefined
-    if (isGoldenMember) {
-      const result = await registerGoldenMember({
-        clerkUserEmail,
-        clerkUserName,
-        full_name: formData.gm_full_name,
-        contact_no: formData.gm_phone,
-        innergy_email: formData.gm_email,
-        city_center: formData.gm_city_center,
-        zone: formData.gm_zone,
-        dob: formData.gm_dob,
-        preferred_language: formData.gm_language,
-        remarks: formData.gm_remarks,
-        sewadar_id: sewadarId,
-      })
-      setSubmitting(false)
-      if (result?.error) {
-        toast.error(result.error)
-        return
-      }
-      toast.success('Golden Member Registered', { description: `${formData.gm_full_name} added as Golden Member.` })
-    } else {
-      if (!formData.app_status) {
-        setSubmitting(false)
-        return
-      }
-      const result = await logStandardPromotion({
-        clerkUserEmail,
-        clerkUserName,
-        app_status: formData.app_status,
-        citizen_name: formData.citizen_name,
-        contact_number: formData.contact_number,
-        email_used: formData.email_used,
-        tech_issue_notes: formData.tech_issue_notes,
-        sewadar_id: sewadarId,
-      })
-      setSubmitting(false)
-      if (result?.error) {
-        toast.error(result.error)
-        return
-      }
-      toast.success('Interaction logged successfully')
+    const result = await logStandardPromotion({
+      clerkUserEmail,
+      clerkUserName: user?.user_metadata?.full_name || '',
+      app_status: formData.app_status,
+      citizen_name: formData.citizen_name,
+      contact_number: formData.contact_number,
+      email_used: formData.email_used,
+      tech_issue_notes: formData.tech_issue_notes,
+      sewadar_id: sewadarId,
+    })
+    setSubmitting(false)
+    if (result?.error) {
+      toast.error(result.error)
+      return
     }
-
+    toast.success('Interaction logged successfully')
     setFormData(INITIAL_FORM)
     setIsGoldenMember(false)
     setDialogOpen(false)
     fetchPromotions()
+  }
+
+  const handleGoldenMemberSubmit = async (data) => {
+    if (!user?.email) return { error: 'You must be signed in.' }
+    setSubmitting(true)
+    const sewadarId = attributionSewadarId && attributionSewadarId !== '__me__' ? attributionSewadarId : undefined
+    const result = await upsertGoldenMember({ ...data, sewadar_id: sewadarId })
+    setSubmitting(false)
+    if (result?.error) return { error: result.error }
+    toast.success('Golden Member Registered', { description: `${data.name} added to CRM.` })
+    return {}
   }
 
   const handleDialogOpenChange = (open) => {
@@ -230,58 +201,69 @@ export default function PromotionsPage() {
           <CardTitle className="text-sm font-medium">Recent Interactions</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Sewadar</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Tech Issues</TableHead>
-                  {canViewAll && <TableHead>Registered By</TableHead>}
+                  <TableHead className="whitespace-nowrap">Date/Time</TableHead>
+                  <TableHead className="whitespace-nowrap">Volunteer</TableHead>
+                  <TableHead className="whitespace-nowrap">Citizen Name</TableHead>
+                  <TableHead className="whitespace-nowrap">Interaction Type</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {promotions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={canViewAll ? 8 : 7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
                       No interactions found.
                     </TableCell>
                   </TableRow>
                 ) : (
                   promotions.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="text-xs whitespace-nowrap">{p.created_at}</TableCell>
-                      <TableCell>
+                    <TableRow
+                      key={p.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setDetailInteraction(p)}
+                    >
+                      <TableCell className="text-xs whitespace-nowrap align-top">
+                        {formatTableDateTime(p.created_at)}
+                      </TableCell>
+                      <TableCell className="align-top" onClick={(e) => e.stopPropagation()}>
+                        {p.registered_by ? (
+                          <Link
+                            href={`/dashboard/volunteers?volunteerId=${p.registered_by}`}
+                            className="text-primary hover:underline font-medium"
+                          >
+                            {p.sewadar_name}
+                          </Link>
+                        ) : (
+                          <span>{p.sewadar_name}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="align-top" onClick={(e) => e.stopPropagation()}>
+                        {p.golden_member_id ? (
+                          <Link
+                            href={`/dashboard/golden-members/${p.golden_member_id}`}
+                            className="text-primary hover:underline font-medium"
+                          >
+                            {p.citizen_name || '—'}
+                          </Link>
+                        ) : (
+                          <Link
+                            href="/dashboard/golden-members"
+                            className="text-muted-foreground hover:underline"
+                          >
+                            {p.citizen_name || '—'}
+                          </Link>
+                        )}
+                      </TableCell>
+                      <TableCell className="align-top">
                         {p.interaction_type === 'Golden Member' ? (
                           <Badge className="bg-amber-100 text-amber-800 whitespace-nowrap">Golden Member</Badge>
                         ) : (
                           <Badge variant="outline" className="whitespace-nowrap">Standard</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">{p.sewadar_name}</TableCell>
-                      <TableCell className="font-medium">{p.citizen_name || '--'}</TableCell>
-                      <TableCell>{p.contact_number || '--'}</TableCell>
-                      <TableCell>
-                        {p.interaction_type === 'Golden Member' ? (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        ) : p.app_status === 'New Installation' ? (
-                          <Badge className="bg-green-100 text-green-800 whitespace-nowrap">New Install</Badge>
-                        ) : (
-                          <Badge variant="secondary" className="whitespace-nowrap">Already Installed</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="max-w-[150px] truncate text-xs">
-                        {p.tech_issue_notes || '--'}
-                      </TableCell>
-                      {canViewAll && (
-                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                          {p.registered_by_name}
-                        </TableCell>
-                      )}
                     </TableRow>
                   ))
                 )}
@@ -291,30 +273,38 @@ export default function PromotionsPage() {
         </CardContent>
       </Card>
 
+      <InteractionDetailSheet
+        interaction={detailInteraction}
+        open={!!detailInteraction}
+        onClose={() => setDetailInteraction(null)}
+      />
+
       <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Log Interaction</DialogTitle>
             <DialogDescription>
-              {canProxyAttribution ? 'Record a citizen interaction. Optionally attribute to another sewadar.' : 'Record a citizen interaction. You are logged as the sewadar.'}
+              {canProxyAttribution ? 'Record a citizen interaction. Optionally attribute to another volunteer.' : 'Record a citizen interaction. You are logged as the volunteer.'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-4">
             {canProxyAttribution && (
-              <div className="space-y-2">
-                <Label>Attribute to (Sewadar)</Label>
-                <Select value={attributionSewadarId} onValueChange={setAttributionSewadarId}>
-                  <SelectTrigger><SelectValue placeholder="Me (logged-in user)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__me__">Me (logged-in user)</SelectItem>
-                    {sewadars.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.full_name || s.email}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label>Attribute to (Volunteer)</Label>
+                  <Select value={attributionSewadarId} onValueChange={setAttributionSewadarId}>
+                    <SelectTrigger><SelectValue placeholder="Me (logged-in user)" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__me__">Me (logged-in user)</SelectItem>
+                      {sewadars.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.full_name || s.email}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Separator />
+              </>
             )}
-            <Separator />
 
             <div className="space-y-2">
               <Label>Is the citizen 50+ years old? (Golden Member)</Label>
@@ -341,61 +331,29 @@ export default function PromotionsPage() {
             <Separator />
 
             {isGoldenMember ? (
-              <div className="space-y-4">
+              <>
                 <p className="text-xs text-muted-foreground">
                   Register this citizen as a Golden Member (50+ years old). Full CRM profile will be created.
                 </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2 col-span-2">
-                    <Label htmlFor="gm_full_name">Full Name</Label>
-                    <Input id="gm_full_name" value={formData.gm_full_name} onChange={set('gm_full_name')} required />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="gm_phone">Phone</Label>
-                    <Input id="gm_phone" type="tel" value={formData.gm_phone} onChange={set('gm_phone')} required />
-                  </div>
-                  <div className="space-y-2 col-span-2">
-                    <Label htmlFor="gm_email">Innergy Email</Label>
-                    <Input id="gm_email" type="email" value={formData.gm_email} onChange={set('gm_email')} className="w-full" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="gm_city_center">City Center</Label>
-                    <Input id="gm_city_center" value={formData.gm_city_center} onChange={set('gm_city_center')} required />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Zone</Label>
-                    <Select value={formData.gm_zone} onValueChange={setVal('gm_zone')}>
-                      <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                      <SelectContent>
-                        {ZONE_OPTIONS.map((z) => (
-                          <SelectItem key={z} value={z}>{z}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="gm_dob">Date of Birth</Label>
-                    <Input id="gm_dob" type="date" value={formData.gm_dob} onChange={set('gm_dob')} required />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Language</Label>
-                    <Select value={formData.gm_language} onValueChange={setVal('gm_language')}>
-                      <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                      <SelectContent>
-                        {LANGUAGE_OPTIONS.map((l) => (
-                          <SelectItem key={l} value={l}>{l}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2 col-span-2">
-                    <Label htmlFor="gm_remarks">Remarks</Label>
-                    <Textarea id="gm_remarks" value={formData.gm_remarks} onChange={set('gm_remarks')} rows={2} />
-                  </div>
-                </div>
-              </div>
+                <GoldenMemberForm
+                  onSubmit={handleGoldenMemberSubmit}
+                  onSuccess={() => {
+                    setFormData(INITIAL_FORM)
+                    setIsGoldenMember(false)
+                    setDialogOpen(false)
+                    fetchPromotions()
+                  }}
+                  isSubmitting={submitting}
+                  submitLabel="Register Golden Member"
+                />
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
+                    Cancel
+                  </Button>
+                </DialogFooter>
+              </>
             ) : (
-              <>
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label>App Status</Label>
                   <Select value={formData.app_status} onValueChange={setVal('app_status')}>
@@ -422,17 +380,16 @@ export default function PromotionsPage() {
                   <Label htmlFor="tech_issue_notes">Tech Issue Notes</Label>
                   <Textarea id="tech_issue_notes" value={formData.tech_issue_notes} onChange={set('tech_issue_notes')} placeholder="Any technical issues encountered" rows={2} />
                 </div>
-              </>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>Cancel</Button>
+                  <Button type="submit" disabled={submitting}>
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Submit
+                  </Button>
+                </DialogFooter>
+              </form>
             )}
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>Cancel</Button>
-              <Button type="submit" disabled={submitting}>
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {isGoldenMember ? 'Register Golden Member' : 'Submit'}
-              </Button>
-            </DialogFooter>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

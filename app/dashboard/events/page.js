@@ -232,7 +232,7 @@ export default function EventsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="support">Support Sewadars (comma-separated)</Label>
+              <Label htmlFor="support">Support Volunteers (comma-separated)</Label>
               <Input
                 id="support"
                 value={formData.support}

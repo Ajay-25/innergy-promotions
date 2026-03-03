@@ -9,6 +9,7 @@ import {
   Smartphone,
   Calendar,
   ShieldCheck,
+  Heart,
 } from 'lucide-react'
 import { useDashboard } from '@/contexts/DashboardContext'
 
@@ -21,7 +22,7 @@ const NAV_ITEMS = [
   },
   {
     label: 'Volunteers',
-    href: '/dashboard/sewadars',
+    href: '/dashboard/volunteers',
     icon: Users,
     requiredPermission: 'sewadars:view',
   },
@@ -30,6 +31,12 @@ const NAV_ITEMS = [
     href: '/dashboard/promotions',
     icon: Smartphone,
     requiredPermission: 'promotions:view',
+  },
+  {
+    label: 'Golden Members',
+    href: '/dashboard/golden-members',
+    icon: Heart,
+    requiredPermission: 'golden_members:view',
   },
   {
     label: 'Events',

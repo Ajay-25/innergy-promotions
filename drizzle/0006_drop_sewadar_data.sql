@@ -1,0 +1,1 @@
+DROP TABLE "sewadar_data" CASCADE;

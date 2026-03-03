@@ -1,0 +1,2 @@
+ALTER TABLE "sewadar_data" ADD COLUMN "weekly_routine" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "sewadar_roster" ADD COLUMN "is_available_on_date" boolean DEFAULT true NOT NULL;

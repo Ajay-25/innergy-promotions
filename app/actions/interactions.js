@@ -4,7 +4,6 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from '@/db'
 import {
   sewadarCore,
-  sewadarData,
   promotionLogs,
   goldenMembers,
 } from '@/db/schema'
@@ -24,7 +23,7 @@ export async function getLinkedSewadarId(clerkUserId) {
   return row?.id ?? null
 }
 
-async function getMySewadarId() {
+export async function getMySewadarId() {
   const user = await currentUser()
   if (!user) return null
   const byClerkId = await getLinkedSewadarId(user.id)
@@ -57,10 +56,13 @@ export async function getPromotions() {
       techIssueNotes: promotionLogs.techIssueNotes,
       createdAt: promotionLogs.createdAt,
       registeredBy: promotionLogs.registeredBy,
-      sewadarFullName: sewadarData.fullName,
+      sewadarName: sewadarCore.name,
+      goldenMemberId: goldenMembers.id,
+      citizenZone: goldenMembers.zone,
     })
     .from(promotionLogs)
-    .leftJoin(sewadarData, eq(promotionLogs.registeredBy, sewadarData.sewadarId))
+    .leftJoin(sewadarCore, eq(promotionLogs.registeredBy, sewadarCore.id))
+    .leftJoin(goldenMembers, eq(promotionLogs.contactNumber, goldenMembers.phone))
     .orderBy(desc(promotionLogs.createdAt))
 
   const filtered = canViewAll ? rows : rows.filter((r) => r.registeredBy === mySewadarId)
@@ -74,10 +76,12 @@ export async function getPromotions() {
       email_used: r.emailUsed || '',
       app_status: r.appStatus || '',
       tech_issue_notes: r.techIssueNotes || '',
-      created_at: r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : '',
+      created_at: r.createdAt ? new Date(r.createdAt).toISOString() : '',
       registered_by: r.registeredBy,
-      sewadar_name: r.sewadarFullName || '—',
-      registered_by_name: r.sewadarFullName || '—',
+      sewadar_name: (r.sewadarName && r.sewadarName.trim()) || '—',
+      registered_by_name: (r.sewadarName && r.sewadarName.trim()) || '—',
+      golden_member_id: r.goldenMemberId ?? null,
+      citizen_zone: (r.citizenZone && r.citizenZone.trim()) || '',
     })),
   }
 }
@@ -96,19 +100,22 @@ export async function getGoldenMembers() {
   const rows = await db
     .select({
       id: goldenMembers.id,
-      fullName: goldenMembers.fullName,
-      contactNo: goldenMembers.contactNo,
+      name: goldenMembers.name,
+      phone: goldenMembers.phone,
       innergyEmail: goldenMembers.innergyEmail,
-      cityCenter: goldenMembers.cityCenter,
-      zone: goldenMembers.zone,
-      dob: goldenMembers.dob,
+      gender: goldenMembers.gender,
       preferredLanguage: goldenMembers.preferredLanguage,
+      dob: goldenMembers.dob,
+      address: goldenMembers.address,
+      zone: goldenMembers.zone,
+      center: goldenMembers.center,
       remarks: goldenMembers.remarks,
       registeredBy: goldenMembers.registeredBy,
-      sewadarFullName: sewadarData.fullName,
+      createdAt: goldenMembers.createdAt,
+      sewadarName: sewadarCore.name,
     })
     .from(goldenMembers)
-    .leftJoin(sewadarData, eq(goldenMembers.registeredBy, sewadarData.sewadarId))
+    .leftJoin(sewadarCore, eq(goldenMembers.registeredBy, sewadarCore.id))
     .orderBy(desc(goldenMembers.createdAt))
 
   const filtered = canViewAll ? rows : rows.filter((r) => r.registeredBy === mySewadarId)
@@ -116,16 +123,19 @@ export async function getGoldenMembers() {
   return {
     data: filtered.map((r) => ({
       id: r.id,
-      full_name: r.fullName || '',
-      contact_no: r.contactNo || '',
+      name: r.name || '',
+      phone: r.phone || '',
       innergy_email: r.innergyEmail || '',
-      city_center: r.cityCenter || '',
-      zone: r.zone || '',
+      gender: r.gender || '',
+      preferred_language: r.preferredLanguage || '',
       dob: r.dob || '',
-      preferred_language: r.preferredLanguage || 'Hindi',
+      address: r.address || '',
+      zone: r.zone || '',
+      center: r.center || '',
       remarks: r.remarks || '',
       registered_by: r.registeredBy,
-      registered_by_name: r.sewadarFullName || '—',
+      registered_by_name: (r.sewadarName && r.sewadarName.trim()) || '—',
+      created_at: r.createdAt,
     })),
   }
 }
@@ -161,48 +171,4 @@ export async function logStandardPromotion(data) {
   return { ok: true }
 }
 
-/**
- * Register a golden member. Optional sewadar_id for proxy (admin) attribution; else uses getLinkedSewadarId(userId).
- * Requires golden_members:register (or system:manage_access).
- */
-export async function registerGoldenMember(data) {
-  const { userId } = await auth()
-  if (!userId) return { error: 'Unauthorized' }
-
-  const user = await currentUser()
-  const perms = Array.isArray(user?.publicMetadata?.permissions) ? user.publicMetadata.permissions : []
-  if (!hasPermission(perms, 'golden_members:register') && !hasPermission(perms, 'system:manage_access')) {
-    return { error: 'Forbidden' }
-  }
-
-  let sewadarId = data.sewadar_id ?? null
-  if (!sewadarId) sewadarId = await getLinkedSewadarId(userId)
-  if (!sewadarId) return { error: 'Could not resolve sewadar (link your account in Access or provide sewadar_id)' }
-
-  const [inserted] = await db
-    .insert(goldenMembers)
-    .values({
-      registeredBy: sewadarId,
-      fullName: data.full_name ?? '',
-      contactNo: data.contact_no ?? '',
-      innergyEmail: data.innergy_email ?? '',
-      cityCenter: data.city_center ?? '',
-      zone: data.zone ?? '',
-      dob: data.dob || null,
-      preferredLanguage: data.preferred_language || 'Hindi',
-      remarks: data.remarks ?? '',
-    })
-    .returning({ id: goldenMembers.id })
-
-  if (!inserted) return { error: 'Insert failed' }
-
-  await db.insert(promotionLogs).values({
-    registeredBy: sewadarId,
-    interactionType: 'Golden Member',
-    citizenName: data.full_name ?? '',
-    contactNumber: data.contact_no ?? '',
-    emailUsed: data.innergy_email ?? '',
-  })
-
-  return { ok: true }
-}
+// Golden member registration is handled by upsertGoldenMember in @/app/actions/golden-members.js
